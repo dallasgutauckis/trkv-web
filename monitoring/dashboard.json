@@ -1,0 +1,263 @@
+{
+  "displayName": "TRKV Web Dashboard",
+  "gridLayout": {
+    "columns": "2",
+    "widgets": [
+      {
+        "title": "Instance Count",
+        "xyChart": {
+          "dataSets": [{
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"run.googleapis.com/container/instance_count\"",
+                "aggregation": {
+                  "alignmentPeriod": "60s",
+                  "perSeriesAligner": "ALIGN_MAX"
+                }
+              }
+            },
+            "plotType": "LINE"
+          }],
+          "thresholds": [{
+            "value": 2,
+            "label": "Max Instances Warning"
+          }]
+        }
+      },
+      {
+        "title": "CPU Utilization per Instance",
+        "xyChart": {
+          "dataSets": [{
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"run.googleapis.com/container/cpu/utilization\"",
+                "aggregation": {
+                  "alignmentPeriod": "60s",
+                  "perSeriesAligner": "ALIGN_MEAN"
+                }
+              }
+            },
+            "plotType": "STACKED_AREA"
+          }],
+          "thresholds": [
+            {
+              "value": 0.7,
+              "label": "Warning"
+            },
+            {
+              "value": 0.85,
+              "label": "Critical"
+            }
+          ]
+        }
+      },
+      {
+        "title": "Concurrent Requests",
+        "xyChart": {
+          "dataSets": [{
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"run.googleapis.com/container/concurrent_requests\"",
+                "aggregation": {
+                  "alignmentPeriod": "60s",
+                  "perSeriesAligner": "ALIGN_SUM"
+                }
+              }
+            },
+            "plotType": "LINE"
+          }],
+          "thresholds": [
+            {
+              "value": 50,
+              "label": "Warning"
+            },
+            {
+              "value": 70,
+              "label": "Critical"
+            }
+          ]
+        }
+      },
+      {
+        "title": "Request Latency (p95)",
+        "heatmap": {
+          "timeSeriesQuery": {
+            "timeSeriesFilter": {
+              "filter": "metric.type=\"run.googleapis.com/container/request_latencies\"",
+              "aggregation": {
+                "alignmentPeriod": "60s",
+                "perSeriesAligner": "ALIGN_PERCENTILE_95"
+              }
+            }
+          },
+          "thresholds": [
+            {
+              "value": 150,
+              "label": "Warning"
+            },
+            {
+              "value": 200,
+              "label": "Critical"
+            }
+          ]
+        }
+      },
+      {
+        "title": "Memory Usage",
+        "xyChart": {
+          "dataSets": [{
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"run.googleapis.com/container/memory/utilization\"",
+                "aggregation": {
+                  "alignmentPeriod": "60s",
+                  "perSeriesAligner": "ALIGN_MEAN"
+                }
+              }
+            },
+            "plotType": "LINE"
+          }],
+          "thresholds": [
+            {
+              "value": 0.7,
+              "label": "Warning"
+            },
+            {
+              "value": 0.85,
+              "label": "Critical"
+            }
+          ]
+        }
+      },
+      {
+        "title": "Error Rate",
+        "xyChart": {
+          "dataSets": [{
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"run.googleapis.com/container/request_count\" AND metric.labels.response_code_class >= 400",
+                "aggregation": {
+                  "alignmentPeriod": "60s",
+                  "perSeriesAligner": "ALIGN_RATE"
+                }
+              }
+            },
+            "plotType": "LINE"
+          }],
+          "thresholds": [
+            {
+              "value": 0.01,
+              "label": "Warning"
+            },
+            {
+              "value": 0.05,
+              "label": "Critical"
+            }
+          ]
+        }
+      },
+      {
+        "title": "WebSocket Connections",
+        "xyChart": {
+          "dataSets": [{
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"custom/websocket/active_connections\"",
+                "aggregation": {
+                  "alignmentPeriod": "60s",
+                  "perSeriesAligner": "ALIGN_SUM"
+                }
+              }
+            },
+            "plotType": "LINE"
+          }],
+          "thresholds": [{
+            "value": 800,
+            "label": "Max Connections Warning"
+          }]
+        }
+      },
+      {
+        "title": "Firestore Operations",
+        "xyChart": {
+          "dataSets": [
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"firestore.googleapis.com/document/read_count\"",
+                  "aggregation": {
+                    "alignmentPeriod": "3600s",
+                    "perSeriesAligner": "ALIGN_SUM"
+                  }
+                }
+              },
+              "plotType": "STACKED_BAR"
+            },
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"firestore.googleapis.com/document/write_count\"",
+                  "aggregation": {
+                    "alignmentPeriod": "3600s",
+                    "perSeriesAligner": "ALIGN_SUM"
+                  }
+                }
+              },
+              "plotType": "STACKED_BAR"
+            }
+          ],
+          "thresholds": [
+            {
+              "value": 40000,
+              "label": "Warning"
+            },
+            {
+              "value": 45000,
+              "label": "Critical"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "alertPolicies": [
+    {
+      "displayName": "Instance Count Alert",
+      "conditions": [{
+        "displayName": "Max Instances Warning",
+        "conditionThreshold": {
+          "filter": "metric.type=\"run.googleapis.com/container/instance_count\"",
+          "comparison": "COMPARISON_GT",
+          "threshold": 2,
+          "duration": "60s"
+        }
+      }],
+      "notificationChannels": [
+        "projects/${PROJECT_ID}/notificationChannels/${DISCORD_CHANNEL_ID}",
+        "projects/${PROJECT_ID}/notificationChannels/${EMAIL_CHANNEL_ID}"
+      ]
+    },
+    {
+      "displayName": "High CPU Usage Alert",
+      "conditions": [{
+        "displayName": "CPU Critical",
+        "conditionThreshold": {
+          "filter": "metric.type=\"run.googleapis.com/container/cpu/utilization\"",
+          "comparison": "COMPARISON_GT",
+          "threshold": 0.85,
+          "duration": "300s"
+        }
+      }],
+      "notificationChannels": [
+        "projects/${PROJECT_ID}/notificationChannels/${DISCORD_CHANNEL_ID}",
+        "projects/${PROJECT_ID}/notificationChannels/${EMAIL_CHANNEL_ID}"
+      ]
+    }
+  ],
+  "refreshSettings": {
+    "refreshRate": "1m"
+  },
+  "timeSelection": {
+    "timeRange": "1h"
+  }
+} 

@@ -1,0 +1,69 @@
+config:
+  target: "http://localhost:3000"
+  phases:
+    - duration: 60
+      arrivalRate: 5
+      rampTo: 50
+      name: "Warm up phase"
+    - duration: 300
+      arrivalRate: 50
+      name: "Sustained load phase"
+    - duration: 60
+      arrivalRate: 50
+      rampTo: 100
+      name: "Stress test phase"
+  ws:
+    # Enable WebSocket testing
+    enabled: true
+  plugins:
+    metrics-by-endpoint: {}
+    expect: {}
+
+scenarios:
+  - name: "VIP Management Flow"
+    weight: 7
+    flow:
+      - post:
+          url: "/api/vip"
+          json:
+            userId: "{{ $randomString() }}"
+            username: "TestUser{{ $randomNumber(1, 1000) }}"
+            channelId: "test-channel"
+            redeemedWith: "channel_points"
+          expect:
+            - statusCode: 200
+            - contentType: json
+      - get:
+          url: "/api/vip?channelId=test-channel"
+          expect:
+            - statusCode: 200
+            - contentType: json
+      - delete:
+          url: "/api/vip?sessionId={{ $randomString() }}&channelId=test-channel&userId={{ $randomString() }}"
+          expect:
+            - statusCode: 200
+            - contentType: json
+
+  - name: "WebSocket Updates"
+    weight: 3
+    engine: "ws"
+    flow:
+      - connect: "ws://localhost:3000/api/ws?channelId=test-channel"
+      - think: 5
+      - send: '{"type":"ping"}'
+      - think: 2
+      - close: true
+
+before:
+  flow:
+    # Authenticate before running tests
+    - post:
+        url: "/api/auth/signin"
+        json:
+          provider: "twitch"
+        capture:
+          - json: "$.accessToken"
+            as: "token"
+    - function: "setAuthHeader"
+
+processor: "./processor.js" 
