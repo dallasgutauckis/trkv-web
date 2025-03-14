@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth/next';
 import * as z from 'zod';
 import { grantVIPStatus, removeVIPStatus, isUserVIP } from '@/lib/twitch';
 import { createVIPSession, deactivateVIPSession, getActiveVIPSessions, logAuditEvent } from '@/lib/db';
-import { broadcastUpdate } from '@/lib/websocket';
+import { broadcastToChannel } from '@/app/api/ws/route';
 
 const grantVIPSchema = z.object({
   userId: z.string(),
@@ -69,7 +69,7 @@ export async function POST(req: Request) {
 
     // Get updated VIP list and broadcast
     const activeSessions = await getActiveVIPSessions(body.channelId);
-    broadcastUpdate(body.channelId, {
+    broadcastToChannel(body.channelId, {
       type: 'vip_update',
       vips: activeSessions,
     });
@@ -129,7 +129,7 @@ export async function DELETE(req: Request) {
 
     // Get updated VIP list and broadcast
     const activeSessions = await getActiveVIPSessions(channelId);
-    broadcastUpdate(channelId, {
+    broadcastToChannel(channelId, {
       type: 'vip_update',
       vips: activeSessions,
     });
