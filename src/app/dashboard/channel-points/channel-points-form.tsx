@@ -1,111 +1,175 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { toast } from "react-hot-toast";
 import { Button } from "@/components/ui/button";
 
-export default function ChannelPointsForm() {
+interface ChannelPointReward {
+  id: string;
+  title: string;
+  cost: number;
+  isEnabled: boolean;
+  prompt?: string;
+  backgroundColor?: string;
+}
+
+interface ChannelPointsFormProps {
+  initialChannelId: string;
+  initialAccessToken: string;
+}
+
+export default function ChannelPointsForm({ initialChannelId, initialAccessToken }: ChannelPointsFormProps) {
   const { data: session } = useSession();
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    title: "VIP Status (12 Hours)",
-    cost: 5000,
-  });
+  const [isFetching, setIsFetching] = useState(true);
+  const [rewards, setRewards] = useState<ChannelPointReward[]>([]);
+  const [selectedRewardId, setSelectedRewardId] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
+  useEffect(() => {
+    const fetchRewards = async () => {
+      try {
+        setError(null);
+        setIsFetching(true);
+        console.log("Starting fetchRewards in ChannelPointsForm:", {
+          channelId: initialChannelId,
+          hasAccessToken: !!initialAccessToken,
+          accessTokenPrefix: initialAccessToken ? initialAccessToken.slice(0, 10) + '...' : 'none'
+        });
+        
+        const response = await fetch(`/api/channel-points?channelId=${initialChannelId}`, {
+          headers: {
+            "Authorization": `Bearer ${initialAccessToken}`,
+          },
+        });
 
-    try {
-      const response = await fetch("/api/channel-points", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ...formData,
-          channelId: session?.user?.id,
-        }),
-      });
+        const data = await response.json();
+        console.log("API Response:", {
+          status: response.status,
+          ok: response.ok,
+          data: data
+        });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Failed to create reward");
+        if (!response.ok) {
+          const errorMessage = data.error || "Failed to fetch rewards";
+          console.error("API error:", errorMessage);
+          throw new Error(errorMessage);
+        }
+
+        if (!Array.isArray(data)) {
+          console.error("Invalid response format:", data);
+          throw new Error("Invalid response format from API");
+        }
+
+        // Validate each reward
+        const validRewards = data.filter((reward): reward is ChannelPointReward => {
+          if (!reward || typeof reward !== 'object') {
+            console.warn("Invalid reward object:", reward);
+            return false;
+          }
+
+          if (!reward.id || !reward.title || typeof reward.cost !== 'number') {
+            console.warn("Reward missing required fields:", {
+              hasId: !!reward.id,
+              hasTitle: !!reward.title,
+              costType: typeof reward.cost,
+              reward: reward
+            });
+            return false;
+          }
+
+          return true;
+        });
+
+        console.log("Processed rewards:", {
+          total: data.length,
+          valid: validRewards.length,
+          rewards: validRewards
+        });
+        
+        setRewards(validRewards);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to load channel point rewards";
+        console.error("Error in fetchRewards:", {
+          error: error instanceof Error ? error.message : error,
+          channelId: initialChannelId,
+          hasAccessToken: !!initialAccessToken,
+          stack: error instanceof Error ? error.stack : undefined
+        });
+        setError(message);
+        toast.error(message);
+      } finally {
+        setIsFetching(false);
       }
+    };
 
-      toast.success("Channel point reward created successfully!");
-      router.refresh();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Something went wrong");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    fetchRewards();
+  }, [initialChannelId, initialAccessToken]);
+
+  const selectedReward = rewards.find(r => r.id === selectedRewardId);
+  console.log("Current rewards:", rewards);
+  console.log("Selected reward:", selectedReward);
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <div className="space-y-6">
+      {error && (
+        <div className="p-4 text-sm text-red-700 bg-red-100 rounded-lg">
+          {error}
+        </div>
+      )}
+      
       <div className="space-y-4">
         <div>
           <label
-            htmlFor="title"
+            htmlFor="reward"
             className="block text-sm font-medium text-gray-700"
           >
-            Reward Title
+            Select Existing Reward
           </label>
-          <input
-            type="text"
-            id="title"
-            value={formData.title}
-            onChange={(e) =>
-              setFormData((prev) => ({ ...prev, title: e.target.value }))
-            }
+          <select
+            id="reward"
+            value={selectedRewardId}
+            onChange={(e) => setSelectedRewardId(e.target.value)}
             className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
-            maxLength={45}
-            required
-          />
+            disabled={isFetching}
+          >
+            <option value="">
+              {isFetching ? "Loading rewards..." : "Select a reward"}
+            </option>
+            {rewards.map((reward) => (
+              <option 
+                key={reward.id} 
+                value={reward.id}
+              >
+                {reward.title} ({reward.cost.toLocaleString()} points)
+                {reward.isEnabled === false ? ' (Disabled)' : ''}
+              </option>
+            ))}
+          </select>
           <p className="mt-1 text-sm text-gray-500">
-            Maximum 45 characters
+            {isFetching ? "Loading rewards..." :
+              rewards.length > 0 
+                ? `${rewards.length} existing reward${rewards.length === 1 ? '' : 's'} found` 
+                : "No channel point rewards found"
+            }
           </p>
         </div>
 
-        <div>
-          <label
-            htmlFor="cost"
-            className="block text-sm font-medium text-gray-700"
-          >
-            Cost (Channel Points)
-          </label>
-          <input
-            type="number"
-            id="cost"
-            value={formData.cost}
-            onChange={(e) =>
-              setFormData((prev) => ({
-                ...prev,
-                cost: parseInt(e.target.value, 10),
-              }))
-            }
-            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
-            min={1}
-            max={1000000}
-            required
-          />
-          <p className="mt-1 text-sm text-gray-500">
-            Between 1 and 1,000,000 points
-          </p>
-        </div>
+        {selectedReward && (
+          <div className="p-4 rounded-md border border-gray-200">
+            <h3 className="font-medium mb-2">Selected Reward Details</h3>
+            <p><strong>Title:</strong> {selectedReward.title}</p>
+            <p><strong>Cost:</strong> {selectedReward.cost.toLocaleString()} points</p>
+            <p><strong>Status:</strong> {selectedReward.isEnabled ? 'Enabled' : 'Disabled'}</p>
+            {selectedReward.prompt && (
+              <p><strong>Description:</strong> {selectedReward.prompt}</p>
+            )}
+          </div>
+        )}
       </div>
-
-      <Button
-        type="submit"
-        disabled={isLoading}
-        className="w-full bg-purple-600 hover:bg-purple-700"
-      >
-        {isLoading ? "Creating..." : "Create Channel Point Reward"}
-      </Button>
-    </form>
+    </div>
   );
 } 

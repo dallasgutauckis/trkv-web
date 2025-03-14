@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { recordPerformanceMetric } from './lib/monitoring';
+import { getToken } from 'next-auth/jwt';
 
 export async function middleware(request: NextRequest) {
   const startTime = Date.now();
@@ -10,6 +11,14 @@ export async function middleware(request: NextRequest) {
     // Add request ID to headers for tracing
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set('x-request-id', requestId);
+
+    // Check for authentication on dashboard routes
+    if (request.nextUrl.pathname.startsWith('/dashboard')) {
+      const token = await getToken({ req: request });
+      if (!token) {
+        return NextResponse.redirect(new URL('/auth/signin', request.url));
+      }
+    }
 
     const response = NextResponse.next({
       request: {

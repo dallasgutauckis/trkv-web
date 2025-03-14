@@ -1,0 +1,58 @@
+steps:
+  # Install dependencies
+  - name: 'node:20'
+    entrypoint: npm
+    args: ['ci']
+
+  # Build the Next.js application
+  - name: 'node:20'
+    entrypoint: npm
+    args: ['run', 'build']
+    env:
+      - 'PROJECT_ID=${PROJECT_ID}'
+      - 'REGION=${_REGION}'
+      - 'NEXT_PUBLIC_TWITCH_CLIENT_ID=${_NEXT_PUBLIC_TWITCH_CLIENT_ID}'
+      - 'TWITCH_CLIENT_SECRET=${_TWITCH_CLIENT_SECRET}'
+      - 'DATABASE_URL=${_DATABASE_URL}'
+      - 'NEXTAUTH_SECRET=${_NEXTAUTH_SECRET}'
+      - 'NEXTAUTH_URL=${_NEXTAUTH_URL}'
+      - 'DISCORD_WEBHOOK_URL=${_DISCORD_WEBHOOK_URL}'
+      - 'NOTIFICATION_EMAIL=${_NOTIFICATION_EMAIL}'
+
+  # Build and push the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE_NAME}'
+      - '.'
+
+  # Push the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE_NAME}'
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/cloud-builders/gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_SERVICE_NAME}'
+      - '--image'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE_NAME}'
+      - '--region'
+      - '${_REGION}'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--set-env-vars'
+      - 'PROJECT_ID=${PROJECT_ID},REGION=${_REGION},NEXT_PUBLIC_TWITCH_CLIENT_ID=${_NEXT_PUBLIC_TWITCH_CLIENT_ID},TWITCH_CLIENT_SECRET=${_TWITCH_CLIENT_SECRET},DATABASE_URL=${_DATABASE_URL},NEXTAUTH_SECRET=${_NEXTAUTH_SECRET},NEXTAUTH_URL=${_NEXTAUTH_URL},DISCORD_WEBHOOK_URL=${_DISCORD_WEBHOOK_URL},NOTIFICATION_EMAIL=${_NOTIFICATION_EMAIL}'
+
+substitutions:
+  _REGION: us-east1
+  _REPOSITORY: trkv-web
+  _SERVICE_NAME: trkv-web
+
+options:
+  logging: CLOUD_LOGGING_ONLY 

@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth/next';
+import { getServerSession } from 'next-auth';
 import * as z from 'zod';
-import { createChannelPointReward } from '@/lib/twitch';
+import { createChannelPointReward, getChannelPointRewards } from '@/lib/twitch';
 import { getChannelPointReward, updateChannelPointReward } from '@/lib/db';
 import { createEventSubSubscriptions } from '@/lib/eventsub';
+import { authOptions } from '@/lib/auth';
 
 const createRewardSchema = z.object({
   channelId: z.string(),
@@ -13,9 +14,19 @@ const createRewardSchema = z.object({
 
 export async function POST(req: Request) {
   try {
-    const session = await getServerSession();
+    const session = await getServerSession(authOptions);
     if (!session) {
+      console.log("No session found in POST /api/channel-points");
       return new NextResponse('Unauthorized', { status: 401 });
+    }
+
+    const accessToken = (session as any).accessToken;
+    if (!accessToken) {
+      console.log("No access token found in session");
+      return NextResponse.json(
+        { error: 'Missing access token' },
+        { status: 401 }
+      );
     }
 
     const json = await req.json();
@@ -62,8 +73,9 @@ export async function POST(req: Request) {
     return NextResponse.json(reward);
   } catch (error) {
     console.error('Error in channel points POST:', error);
+    const message = error instanceof Error ? error.message : 'Internal server error';
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: message },
       { status: 500 }
     );
   }
@@ -71,25 +83,96 @@ export async function POST(req: Request) {
 
 export async function GET(req: Request) {
   try {
-    const session = await getServerSession();
+    console.log("Handling GET request to /api/channel-points");
+    
+    const session = await getServerSession(authOptions);
     if (!session) {
+      console.log("No session found in GET /api/channel-points");
       return new NextResponse('Unauthorized', { status: 401 });
+    }
+
+    const accessToken = (session as any).accessToken;
+    if (!accessToken) {
+      console.log("No access token found in session");
+      return NextResponse.json(
+        { error: 'Missing access token' },
+        { status: 401 }
+      );
     }
 
     const { searchParams } = new URL(req.url);
     const channelId = searchParams.get('channelId');
 
     if (!channelId) {
+      console.log("Missing channelId in GET /api/channel-points");
       return NextResponse.json(
         { error: 'Missing channelId parameter' },
         { status: 400 }
       );
     }
 
-    const reward = await getChannelPointReward(channelId);
-    return NextResponse.json(reward || null);
+    console.log("Fetching channel point rewards for channel:", channelId);
+    console.log("Using access token:", accessToken.slice(0, 10) + '...');
+    
+    try {
+      const rewards = await getChannelPointRewards(channelId, accessToken);
+      
+      // Log the rewards data for debugging
+      console.log("Rewards from Twitch API:", JSON.stringify(rewards, null, 2));
+      
+      if (!rewards) {
+        console.log("No rewards returned from Twitch API");
+        return NextResponse.json([]);
+      }
+      
+      if (!Array.isArray(rewards)) {
+        console.error("Invalid rewards data format:", rewards);
+        return NextResponse.json(
+          { error: 'Invalid rewards data format' },
+          { status: 500 }
+        );
+      }
+      
+      // Validate and format each reward
+      const formattedRewards = rewards
+        .filter(reward => {
+          if (!reward || !reward.id || !reward.title) {
+            console.warn("Invalid reward object:", reward);
+            return false;
+          }
+          return true;
+        })
+        .map(reward => ({
+          id: reward.id,
+          title: reward.title,
+          cost: reward.cost,
+          isEnabled: reward.isEnabled,
+          prompt: reward.prompt,
+          backgroundColor: reward.backgroundColor || '#9147ff'
+        }));
+      
+      console.log("Formatted rewards:", JSON.stringify(formattedRewards, null, 2));
+      
+      return NextResponse.json(formattedRewards);
+    } catch (error) {
+      console.error("Error fetching rewards from Twitch API:", {
+        error: error instanceof Error ? error.message : error,
+        channelId,
+        hasAccessToken: !!accessToken,
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      
+      return NextResponse.json(
+        { error: 'Failed to fetch channel point rewards from Twitch' },
+        { status: 500 }
+      );
+    }
   } catch (error) {
-    console.error('Error in channel points GET:', error);
+    console.error('Error in channel points GET:', {
+      error: error instanceof Error ? error.message : error,
+      stack: error instanceof Error ? error.stack : undefined
+    });
+    
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

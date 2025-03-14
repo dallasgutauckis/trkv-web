@@ -25,8 +25,8 @@ export default async function RootLayout({
   const session = await getServerSession();
 
   return (
-    <html lang="en">
-      <body className={inter.className}>
+    <html lang="en" className="dark">
+      <body className={`${inter.className} bg-[#0E0E10] text-[#EFEFF1]`}>
         <SessionProvider session={session}>
           {children}
           <Toaster />

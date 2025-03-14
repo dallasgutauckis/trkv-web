@@ -1,6 +1,9 @@
 import { Metadata } from "next";
 import { getServerSession } from "next-auth/next";
 import { redirect } from "next/navigation";
+import VIPList from "./vips/vip-list";
+import ChannelPointsForm from "./channel-points/channel-points-form";
+import { authOptions } from "@/lib/auth";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -8,10 +11,14 @@ export const metadata: Metadata = {
 };
 
 export default async function DashboardPage() {
-  const session = await getServerSession();
+  const session = await getServerSession(authOptions);
 
   if (!session) {
     redirect("/auth/signin");
+  }
+
+  if (!session.user?.id || !session.accessToken) {
+    throw new Error("Missing required session data");
   }
 
   return (
@@ -20,15 +27,15 @@ export default async function DashboardPage() {
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         <div className="p-6 bg-white rounded-lg shadow-sm border">
           <h2 className="text-xl font-semibold mb-4">Active VIPs</h2>
-          <p className="text-gray-600">Loading VIP data...</p>
+          <VIPList initialChannelId={session.user.id} />
         </div>
         <div className="p-6 bg-white rounded-lg shadow-sm border">
           <h2 className="text-xl font-semibold mb-4">Channel Point Settings</h2>
-          <p className="text-gray-600">Configure VIP rewards...</p>
+          <ChannelPointsForm initialChannelId={session.user.id} initialAccessToken={session.accessToken} />
         </div>
         <div className="p-6 bg-white rounded-lg shadow-sm border">
           <h2 className="text-xl font-semibold mb-4">Statistics</h2>
-          <p className="text-gray-600">Loading statistics...</p>
+          <p className="text-gray-600">Coming soon...</p>
         </div>
       </div>
     </div>

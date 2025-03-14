@@ -1,17 +1,38 @@
 import { ApiClient } from '@twurple/api';
-import { AppTokenAuthProvider } from '@twurple/auth';
+import { AppTokenAuthProvider, AccessToken, StaticAuthProvider } from '@twurple/auth';
 import { TWITCH_CONFIG } from '@/config/twitch';
+import type { HelixCustomReward } from '@twurple/api';
 
-const authProvider = new AppTokenAuthProvider(
+interface ChannelPointReward {
+  id: string;
+  title: string;
+  cost: number;
+  prompt: string;
+  backgroundColor: string;
+  isEnabled: boolean;
+  userInputRequired: boolean;
+  maxRedemptionsPerStream: number | null;
+  maxRedemptionsPerUserPerStream: number | null;
+  globalCooldown: number | null;
+  isPaused: boolean;
+  autoFulfill: boolean;
+}
+
+const appAuthProvider = new AppTokenAuthProvider(
   TWITCH_CONFIG.clientId,
   TWITCH_CONFIG.clientSecret
 );
 
-const apiClient = new ApiClient({ authProvider });
+const appClient = new ApiClient({ authProvider: appAuthProvider });
+
+function createUserClient(accessToken: string) {
+  const authProvider = new StaticAuthProvider(TWITCH_CONFIG.clientId, accessToken, TWITCH_CONFIG.scopes);
+  return new ApiClient({ authProvider });
+}
 
 export async function grantVIPStatus(channelId: string, userId: string): Promise<boolean> {
   try {
-    await apiClient.channels.addVip(channelId, userId);
+    await appClient.channels.addVip(channelId, userId);
     return true;
   } catch (error) {
     console.error('Error granting VIP status:', error);
@@ -21,7 +42,7 @@ export async function grantVIPStatus(channelId: string, userId: string): Promise
 
 export async function removeVIPStatus(channelId: string, userId: string): Promise<boolean> {
   try {
-    await apiClient.channels.removeVip(channelId, userId);
+    await appClient.channels.removeVip(channelId, userId);
     return true;
   } catch (error) {
     console.error('Error removing VIP status:', error);
@@ -31,7 +52,7 @@ export async function removeVIPStatus(channelId: string, userId: string): Promis
 
 export async function isUserVIP(channelId: string, userId: string): Promise<boolean> {
   try {
-    const vips = await apiClient.channels.getVips(channelId);
+    const vips = await appClient.channels.getVips(channelId);
     return vips.data.some(vip => vip.id === userId);
   } catch (error) {
     console.error('Error checking VIP status:', error);
@@ -45,7 +66,7 @@ export async function createChannelPointReward(
   cost: number
 ): Promise<string | null> {
   try {
-    const reward = await apiClient.channelPoints.createCustomReward(channelId, {
+    const reward = await appClient.channelPoints.createCustomReward(channelId, {
       title,
       cost,
       isEnabled: true,
@@ -61,5 +82,45 @@ export async function createChannelPointReward(
   } catch (error) {
     console.error('Error creating channel point reward:', error);
     return null;
+  }
+}
+
+export async function getChannelPointRewards(accessToken: string, channelId: string): Promise<ChannelPointReward[]> {
+  try {
+    console.log('Fetching channel point rewards for channel:', channelId);
+    console.log('Access token status:', accessToken ? 'Present' : 'Missing');
+
+    const authProvider = new StaticAuthProvider(TWITCH_CONFIG.clientId, accessToken);
+    const apiClient = new ApiClient({ authProvider });
+
+    console.log('Attempting to fetch custom rewards...');
+    const rewards = await apiClient.channelPoints.getCustomRewards(channelId);
+    console.log('Raw rewards response:', JSON.stringify(rewards, null, 2));
+
+    if (!rewards || rewards.length === 0) {
+      console.log('No rewards found for channel');
+      return [];
+    }
+
+    const formattedRewards = rewards.map(reward => ({
+      id: reward.id,
+      title: reward.title,
+      cost: reward.cost,
+      prompt: reward.prompt,
+      backgroundColor: reward.backgroundColor || '#9147ff',
+      isEnabled: reward.isEnabled,
+      userInputRequired: reward.userInputRequired,
+      maxRedemptionsPerStream: reward.maxRedemptionsPerStream,
+      maxRedemptionsPerUserPerStream: reward.maxRedemptionsPerUserPerStream,
+      globalCooldown: reward.globalCooldown,
+      isPaused: reward.isPaused,
+      autoFulfill: reward.autoFulfill
+    }));
+
+    console.log('Formatted rewards:', JSON.stringify(formattedRewards, null, 2));
+    return formattedRewards;
+  } catch (error) {
+    console.error('Error fetching channel point rewards:', error);
+    throw error;
   }
 } 
