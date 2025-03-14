@@ -26,7 +26,6 @@ export default async function DashboardPage() {
       <h1 className="text-4xl font-bold mb-8 text-[var(--foreground)]">Dashboard</h1>
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         <div className="p-6 bg-[var(--card)] rounded-lg shadow-sm border border-[var(--border)] card-hover">
-          <h2 className="text-xl font-semibold mb-4 text-[var(--card-foreground)]">Active VIPs</h2>
           <VIPList initialChannelId={session.user.id} />
         </div>
         <div className="p-6 bg-[var(--card)] rounded-lg shadow-sm border border-[var(--border)] card-hover">
