@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
 import * as z from 'zod';
-import { grantVIPStatus, removeVIPStatus, isUserVIP } from '@/lib/twitch';
+import { grantVIPStatus, removeVIPStatus, isUserVIP, getAllChannelVIPs, TwitchVIP } from '@/lib/twitch';
 import { createVIPSession, deactivateVIPSession, getActiveVIPSessions, logAuditEvent } from '@/lib/db';
 import { broadcastToChannel } from '@/app/api/ws/route';
+import { authOptions } from '@/lib/auth';
+import type { VIPSession } from '@/types/database';
 
 const grantVIPSchema = z.object({
   userId: z.string(),
@@ -11,6 +13,18 @@ const grantVIPSchema = z.object({
   channelId: z.string(),
   redeemedWith: z.enum(['channel_points', 'manual']),
 });
+
+// Combined VIP data with source information
+export interface EnhancedVIP {
+  id: string;
+  username: string;
+  displayName: string;
+  profileImageUrl: string;
+  isChannelPointsVIP: boolean;
+  expiresAt?: string;
+  redeemedWith?: string;
+  sessionId?: string;
+}
 
 export async function POST(req: Request) {
   try {
@@ -146,13 +160,14 @@ export async function DELETE(req: Request) {
 
 export async function GET(req: Request) {
   try {
-    const session = await getServerSession();
+    const session = await getServerSession(authOptions);
     if (!session) {
       return new NextResponse('Unauthorized', { status: 401 });
     }
 
     const { searchParams } = new URL(req.url);
     const channelId = searchParams.get('channelId');
+    const includeAllVips = searchParams.get('includeAllVips') === 'true';
 
     if (!channelId) {
       return NextResponse.json(
@@ -161,8 +176,47 @@ export async function GET(req: Request) {
       );
     }
 
+    // Get active VIP sessions from our database (channel points VIPs)
     const activeSessions = await getActiveVIPSessions(channelId);
-    return NextResponse.json(activeSessions);
+    
+    // If we only want tracked VIPs, return just those
+    if (!includeAllVips) {
+      return NextResponse.json(activeSessions);
+    }
+    
+    // Otherwise, get all VIPs from Twitch API
+    const allTwitchVIPs = await getAllChannelVIPs(session.accessToken as string, channelId);
+    
+    // Create a map of channel points VIPs for quick lookup
+    const channelPointsVIPMap = new Map<string, VIPSession>();
+    activeSessions.forEach(session => {
+      channelPointsVIPMap.set(session.userId, session);
+    });
+    
+    // Combine the data
+    const enhancedVIPs: EnhancedVIP[] = allTwitchVIPs.map(vip => {
+      const channelPointsSession = channelPointsVIPMap.get(vip.id);
+      
+      return {
+        id: vip.id,
+        username: vip.username,
+        displayName: vip.displayName,
+        profileImageUrl: vip.profileImageUrl,
+        isChannelPointsVIP: !!channelPointsSession,
+        expiresAt: channelPointsSession?.expiresAt?.toISOString(),
+        redeemedWith: channelPointsSession?.redeemedWith,
+        sessionId: channelPointsSession?.id
+      };
+    });
+    
+    // Sort: channel points VIPs first, then alphabetically by display name
+    enhancedVIPs.sort((a, b) => {
+      if (a.isChannelPointsVIP && !b.isChannelPointsVIP) return -1;
+      if (!a.isChannelPointsVIP && b.isChannelPointsVIP) return 1;
+      return a.displayName.localeCompare(b.displayName);
+    });
+    
+    return NextResponse.json(enhancedVIPs);
   } catch (error) {
     console.error('Error in VIP GET:', error);
     return NextResponse.json(

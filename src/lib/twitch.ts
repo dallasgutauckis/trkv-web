@@ -1,7 +1,7 @@
 import { ApiClient } from '@twurple/api';
 import { AppTokenAuthProvider, AccessToken, StaticAuthProvider } from '@twurple/auth';
 import { TWITCH_CONFIG } from '@/config/twitch';
-import type { HelixCustomReward } from '@twurple/api';
+import type { HelixCustomReward, HelixUser } from '@twurple/api';
 
 interface ChannelPointReward {
   id: string;
@@ -16,6 +16,13 @@ interface ChannelPointReward {
   globalCooldown: number | null;
   isPaused: boolean;
   autoFulfill: boolean;
+}
+
+export interface TwitchVIP {
+  id: string;
+  username: string;
+  displayName: string;
+  profileImageUrl: string;
 }
 
 const appAuthProvider = new AppTokenAuthProvider(
@@ -57,6 +64,41 @@ export async function isUserVIP(channelId: string, userId: string): Promise<bool
   } catch (error) {
     console.error('Error checking VIP status:', error);
     return false;
+  }
+}
+
+export async function getAllChannelVIPs(accessToken: string, channelId: string): Promise<TwitchVIP[]> {
+  try {
+    console.log('Fetching all VIPs for channel:', channelId);
+    
+    const authProvider = new StaticAuthProvider(TWITCH_CONFIG.clientId, accessToken);
+    const apiClient = new ApiClient({ authProvider });
+    
+    const vips = await apiClient.channels.getVips(channelId);
+    
+    if (!vips || vips.data.length === 0) {
+      console.log('No VIPs found for channel');
+      return [];
+    }
+    
+    // Get detailed user information for each VIP
+    const formattedVIPs = await Promise.all(vips.data.map(async (vip) => {
+      // For each VIP, get their detailed user information
+      const userInfo = await apiClient.users.getUserById(vip.id);
+      
+      return {
+        id: vip.id,
+        username: vip.name,
+        displayName: vip.displayName,
+        profileImageUrl: userInfo?.profilePictureUrl || ''
+      };
+    }));
+    
+    console.log(`Found ${formattedVIPs.length} VIPs for channel`);
+    return formattedVIPs;
+  } catch (error) {
+    console.error('Error fetching channel VIPs:', error);
+    return [];
   }
 }
 

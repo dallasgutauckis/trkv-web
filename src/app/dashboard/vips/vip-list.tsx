@@ -6,6 +6,8 @@ import { toast } from "react-hot-toast";
 import { Button } from "@/components/ui/button";
 import { calculateTimeRemaining } from "@/lib/utils";
 import type { VIPSession } from "@/types/database";
+import { EnhancedVIP } from "@/app/api/vip/route";
+import Image from "next/image";
 
 interface VIPListProps {
   initialChannelId: string;
@@ -13,7 +15,7 @@ interface VIPListProps {
 
 export default function VIPList({ initialChannelId }: VIPListProps) {
   const { data: session } = useSession();
-  const [vips, setVips] = useState<VIPSession[]>([]);
+  const [vips, setVips] = useState<EnhancedVIP[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sseStatus, setSseStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
@@ -28,7 +30,7 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
     
     try {
       setIsLoading(true);
-      const response = await fetch(`/api/vip?channelId=${initialChannelId}`, {
+      const response = await fetch(`/api/vip?channelId=${initialChannelId}&includeAllVips=true`, {
         headers: {
           "Authorization": `Bearer ${session.accessToken}`,
         },
@@ -84,7 +86,8 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
             // Server ping to keep connection alive, no action needed
             console.log('Received server ping');
           } else if (data.type === 'vip_update') {
-            setVips(data.vips);
+            // When we get an update, refresh the full list to include all VIPs
+            fetchVIPs();
           }
         } catch (error) {
           console.error('Error processing SSE message:', error);
@@ -122,7 +125,7 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
       setSseStatus('error');
       setError('Failed to connect to real-time updates');
     }
-  }, [initialChannelId, session?.accessToken]);
+  }, [initialChannelId, session?.accessToken, fetchVIPs]);
 
   useEffect(() => {
     fetchVIPs();
@@ -142,12 +145,12 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
     };
   }, [fetchVIPs, connectSSE]);
 
-  const handleRemoveVIP = async (session: VIPSession) => {
-    if (!initialChannelId) return;
+  const handleRemoveVIP = async (vip: EnhancedVIP) => {
+    if (!initialChannelId || !vip.sessionId) return;
 
     try {
       const response = await fetch(
-        `/api/vip?sessionId=${session.id}&channelId=${initialChannelId}&userId=${session.userId}`,
+        `/api/vip?sessionId=${vip.sessionId}&channelId=${initialChannelId}&userId=${vip.id}`,
         {
           method: "DELETE",
         }
@@ -155,7 +158,7 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
 
       if (!response.ok) throw new Error("Failed to remove VIP");
 
-      toast.success(`Removed VIP status from ${session.username}`);
+      toast.success(`Removed VIP status from ${vip.displayName}`);
       
       // Refresh the VIP list immediately instead of waiting for SSE
       fetchVIPs();
@@ -186,6 +189,9 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
     );
   }
 
+  // Count channel points VIPs
+  const channelPointsVIPCount = vips.filter(vip => vip.isChannelPointsVIP).length;
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -209,31 +215,64 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
           No active VIPs at the moment
         </div>
       ) : (
-        <div className="divide-y divide-[var(--border)]">
-          {vips.map((vip) => (
-            <div
-              key={vip.id}
-              className="py-4 flex items-center justify-between"
-            >
-              <div>
-                <h3 className="font-medium text-[var(--card-foreground)]">{vip.username}</h3>
-                <p className="text-sm text-[var(--muted-foreground)]">
-                  {calculateTimeRemaining(new Date(vip.expiresAt))}
-                </p>
-                <p className="text-xs text-[var(--muted-foreground)]">
-                  Via: {vip.redeemedWith === "channel_points" ? "Channel Points" : "Manual"}
-                </p>
-              </div>
-              <Button
-                onClick={() => handleRemoveVIP(vip)}
-                className="bg-[var(--destructive)] text-[var(--destructive-foreground)] hover:bg-opacity-90"
-                size="sm"
-              >
-                Remove VIP
-              </Button>
+        <>
+          <div className="flex justify-between items-center">
+            <div className="text-sm text-[var(--muted-foreground)]">
+              {vips.length} total VIPs • {channelPointsVIPCount} via Channel Points
             </div>
-          ))}
-        </div>
+          </div>
+          
+          <div className="divide-y divide-[var(--border)]">
+            {vips.map((vip) => (
+              <div
+                key={vip.id}
+                className={`py-4 flex items-center justify-between ${
+                  vip.isChannelPointsVIP ? 'bg-[var(--primary)] bg-opacity-5 -mx-2 px-2 rounded' : ''
+                }`}
+              >
+                <div className="flex items-center">
+                  {vip.profileImageUrl && (
+                    <div className="mr-3 relative w-10 h-10 rounded-full overflow-hidden">
+                      <Image 
+                        src={vip.profileImageUrl} 
+                        alt={vip.displayName} 
+                        fill
+                        className="object-cover"
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <h3 className="font-medium text-[var(--card-foreground)]">
+                      {vip.displayName}
+                      {vip.isChannelPointsVIP && (
+                        <span className="ml-2 text-xs px-2 py-0.5 bg-[var(--primary)] text-white rounded-full">
+                          Channel Points
+                        </span>
+                      )}
+                    </h3>
+                    {vip.isChannelPointsVIP && vip.expiresAt && (
+                      <p className="text-sm text-[var(--muted-foreground)]">
+                        {calculateTimeRemaining(new Date(vip.expiresAt))}
+                      </p>
+                    )}
+                    <p className="text-xs text-[var(--muted-foreground)]">
+                      @{vip.username}
+                    </p>
+                  </div>
+                </div>
+                {vip.isChannelPointsVIP && vip.sessionId && (
+                  <Button
+                    onClick={() => handleRemoveVIP(vip)}
+                    className="bg-[var(--destructive)] text-[var(--destructive-foreground)] hover:bg-opacity-90"
+                    size="sm"
+                  >
+                    Remove VIP
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
