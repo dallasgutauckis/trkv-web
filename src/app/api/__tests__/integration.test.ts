@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
 import { POST as grantVIP, DELETE as removeVIP, GET as getVIPs } from '../vip/route';
+import { POST as extendVIP } from '../vip/extend/route';
 import { grantVIPStatus, removeVIPStatus, isUserVIP } from '@/lib/twitch';
-import { createVIPSession, deactivateVIPSession, getActiveVIPSessions, logAuditEvent } from '@/lib/db';
-import { broadcastUpdate } from '../ws/route';
+import { createVIPSession, deactivateVIPSession, getActiveVIPSessions, logAuditEvent, updateVIPSessionExpiration } from '@/lib/db';
+import { broadcastToChannel } from '@/lib/sse';
 
 // Mock dependencies
 jest.mock('next-auth/next');
 jest.mock('@/lib/twitch');
 jest.mock('@/lib/db');
-jest.mock('../ws/route');
+jest.mock('@/lib/sse');
 
 describe('VIP Management Integration', () => {
   const mockSession = {
@@ -71,16 +72,65 @@ describe('VIP Management Integration', () => {
           targetUserId: 'test-user',
         })
       );
-      expect(broadcastUpdate).toHaveBeenCalledWith('test-channel', {
+      expect(broadcastToChannel).toHaveBeenCalledWith('test-channel', {
         type: 'vip_update',
         vips: [mockVIPSession],
       });
 
-      // Step 2: Verify VIP status is active
+      // Step 2: Extend VIP duration
+      const extendedSession = {
+        ...mockVIPSession,
+        expiresAt: new Date(mockVIPSession.expiresAt.getTime() + 12 * 60 * 60 * 1000),
+      };
+      
+      (isUserVIP as jest.Mock).mockResolvedValue(true);
+      (updateVIPSessionExpiration as jest.Mock).mockResolvedValue(extendedSession);
+      (getActiveVIPSessions as jest.Mock)
+        .mockResolvedValueOnce([mockVIPSession]) // For finding the session
+        .mockResolvedValueOnce([extendedSession]); // After extending
+
+      const extendRequest = new Request('http://localhost/api/vip/extend', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionId: 'test-session-id',
+          channelId: 'test-channel',
+          userId: 'test-user',
+          username: 'TestUser',
+        }),
+      });
+
+      const extendResponse = await extendVIP(extendRequest);
+      const extendData = await extendResponse.json();
+
+      // Verify VIP was extended successfully
+      expect(extendResponse.status).toBe(200);
+      expect(extendData).toEqual({
+        success: true,
+        vipSession: extendedSession,
+      });
+      expect(updateVIPSessionExpiration).toHaveBeenCalled();
+      expect(logAuditEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'grant_vip',
+          channelId: 'test-channel',
+          targetUserId: 'test-user',
+          details: expect.objectContaining({
+            action: 'extend',
+          }),
+        })
+      );
+      expect(broadcastToChannel).toHaveBeenCalledWith('test-channel', {
+        type: 'vip_update',
+        vips: [extendedSession],
+      });
+
+      // Step 3: Get VIPs
       const getRequest = new Request(
         'http://localhost/api/vip?channelId=test-channel',
         { method: 'GET' }
       );
+
+      (getActiveVIPSessions as jest.Mock).mockResolvedValueOnce([mockVIPSession]);
 
       const getResponse = await getVIPs(getRequest);
       const getData = await getResponse.json();
@@ -88,7 +138,7 @@ describe('VIP Management Integration', () => {
       expect(getResponse.status).toBe(200);
       expect(getData).toEqual([mockVIPSession]);
 
-      // Step 3: Remove VIP status
+      // Step 4: Remove VIP status
       (removeVIPStatus as jest.Mock).mockResolvedValue(true);
 
       const removeRequest = new Request(
@@ -110,12 +160,12 @@ describe('VIP Management Integration', () => {
           targetUserId: 'test-user',
         })
       );
-      expect(broadcastUpdate).toHaveBeenCalledWith('test-channel', {
+      expect(broadcastToChannel).toHaveBeenCalledWith('test-channel', {
         type: 'vip_update',
         vips: [],
       });
 
-      // Step 4: Verify VIP status is removed
+      // Step 5: Verify VIP status is removed
       const finalGetResponse = await getVIPs(getRequest);
       const finalGetData = await finalGetResponse.json();
 

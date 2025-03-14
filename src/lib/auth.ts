@@ -172,11 +172,16 @@ export const authOptions: NextAuthOptions = {
     maxAge: 24 * 60 * 60, // 24 hours
   },
   callbacks: {
-    async jwt({ token, account }) {
+    async jwt({ token, account, user }) {
       console.log("JWT callback called with account:", account ? JSON.stringify({
         ...account,
         access_token: account.access_token ? `${account.access_token.substring(0, 10)}...` : undefined
       }) : "undefined");
+      
+      // Save user data from initial sign in
+      if (user) {
+        token.id = user.id;
+      }
       
       // Initial sign in
       if (account) {
@@ -184,8 +189,7 @@ export const authOptions: NextAuthOptions = {
           accessToken: account.access_token,
           refreshToken: account.refresh_token,
           accessTokenExpires: account.expires_at ? account.expires_at * 1000 : Date.now() + 3600 * 1000,
-          user: token.user,
-          id: account.providerAccountId
+          id: account.providerAccountId || user?.id || token.id,
         };
       }
 
@@ -204,10 +208,20 @@ export const authOptions: NextAuthOptions = {
         accessToken: token.accessToken ? `${token.accessToken.toString().substring(0, 10)}...` : undefined
       }) : "undefined");
       
-      if (session.user) {
-        session.user.id = token.id as string;
-        (session as any).accessToken = token.accessToken;
+      // Ensure session has user object
+      if (!session.user) {
+        session.user = {};
       }
+      
+      // Set user ID and access token
+      session.user.id = token.id as string;
+      session.accessToken = token.accessToken as string;
+      
+      console.log("Session after modification:", JSON.stringify({
+        ...session,
+        accessToken: session.accessToken ? `${session.accessToken.substring(0, 10)}...` : undefined
+      }));
+      
       return session;
     }
   },

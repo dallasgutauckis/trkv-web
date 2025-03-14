@@ -25,10 +25,12 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [isFetching, setIsFetching] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [rewards, setRewards] = useState<ChannelPointReward[]>([]);
   const [selectedRewardId, setSelectedRewardId] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
+  // Fetch rewards and saved settings
   useEffect(() => {
     const fetchRewards = async () => {
       try {
@@ -40,6 +42,7 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
           accessTokenPrefix: initialAccessToken ? initialAccessToken.slice(0, 10) + '...' : 'none'
         });
         
+        // Fetch rewards from Twitch
         const response = await fetch(`/api/channel-points?channelId=${initialChannelId}`, {
           headers: {
             "Authorization": `Bearer ${initialAccessToken}`,
@@ -91,6 +94,26 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
         });
         
         setRewards(validRewards);
+        
+        // Fetch saved settings
+        try {
+          const settingsResponse = await fetch(`/api/settings?channelId=${initialChannelId}`, {
+            headers: {
+              "Authorization": `Bearer ${initialAccessToken}`,
+            },
+          });
+          
+          if (settingsResponse.ok) {
+            const settingsData = await settingsResponse.json();
+            if (settingsData && settingsData.channelPointRewardId) {
+              console.log("Found saved reward ID:", settingsData.channelPointRewardId);
+              setSelectedRewardId(settingsData.channelPointRewardId);
+            }
+          }
+        } catch (settingsError) {
+          console.error("Error fetching settings:", settingsError);
+          // Don't throw here, just continue with empty selection
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to load channel point rewards";
         console.error("Error in fetchRewards:", {
@@ -112,6 +135,45 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
   const selectedReward = rewards.find(r => r.id === selectedRewardId);
   console.log("Current rewards:", rewards);
   console.log("Selected reward:", selectedReward);
+  
+  // Save the selected reward
+  const handleSaveReward = async () => {
+    if (!selectedRewardId) {
+      toast.error("Please select a reward first");
+      return;
+    }
+    
+    try {
+      setIsSaving(true);
+      setError(null);
+      
+      const response = await fetch('/api/settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          "Authorization": `Bearer ${initialAccessToken}`,
+        },
+        body: JSON.stringify({
+          channelId: initialChannelId,
+          channelPointRewardId: selectedRewardId,
+        }),
+      });
+      
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to save settings");
+      }
+      
+      toast.success("Channel point reward saved successfully");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save settings";
+      console.error("Error saving settings:", error);
+      setError(message);
+      toast.error(message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -176,6 +238,16 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
                 ></div>
               </div>
             )}
+            
+            <div className="mt-4">
+              <Button
+                onClick={handleSaveReward}
+                disabled={isSaving}
+                className="bg-[var(--primary)] text-[var(--primary-foreground)] hover:bg-opacity-90"
+              >
+                {isSaving ? "Saving..." : "Save Selection"}
+              </Button>
+            </div>
           </div>
         )}
       </div>

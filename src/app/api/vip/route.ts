@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth/next';
 import * as z from 'zod';
 import { grantVIPStatus, removeVIPStatus, isUserVIP, getAllChannelVIPs, TwitchVIP } from '@/lib/twitch';
 import { createVIPSession, deactivateVIPSession, getActiveVIPSessions, logAuditEvent } from '@/lib/db';
-import { broadcastToChannel } from '@/app/api/ws/route';
+import { broadcastToChannel } from '@/lib/sse';
 import { authOptions } from '@/lib/auth';
 import type { VIPSession } from '@/types/database';
 

@@ -19,8 +19,10 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sseStatus, setSseStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
+  const [timeUpdateCounter, setTimeUpdateCounter] = useState(0);
   const eventSourceRef = useRef<EventSource | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const timeUpdateIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const mountedRef = useRef(false);
   const sessionRetryCountRef = useRef(0);
   const sessionRetryTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -173,7 +175,7 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
     }
   }
 
-  // Handle component mount and unmount
+  // Set mounted ref and clean up on unmount
   useEffect(() => {
     mountedRef.current = true;
     
@@ -214,6 +216,11 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
       if (sessionRetryTimerRef.current) {
         clearTimeout(sessionRetryTimerRef.current);
         sessionRetryTimerRef.current = null;
+      }
+      
+      if (timeUpdateIntervalRef.current) {
+        clearInterval(timeUpdateIntervalRef.current);
+        timeUpdateIntervalRef.current = null;
       }
     };
   }, []);
@@ -276,6 +283,72 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
       console.error("Error removing VIP:", error);
     }
   }
+
+  // Handle extending a VIP's duration
+  async function handleExtendVIP(vip: EnhancedVIP) {
+    if (!initialChannelId || !vip.sessionId || !mountedRef.current) return;
+
+    try {
+      const response = await fetch(`/api/vip/extend`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sessionId: vip.sessionId,
+          channelId: initialChannelId,
+          userId: vip.id,
+          username: vip.username,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to extend VIP duration");
+      }
+
+      toast.success(`Extended VIP status for ${vip.displayName} by 12 hours`);
+      fetchVIPs(true);
+    } catch (error) {
+      toast.error("Failed to extend VIP duration");
+      console.error("Error extending VIP:", error);
+    }
+  }
+
+  // Function to format the remaining time
+  function formatRemainingTime(expiresAt: string | undefined): string {
+    if (!expiresAt) return '';
+    
+    const now = new Date();
+    const expiration = new Date(expiresAt);
+    const diffMs = expiration.getTime() - now.getTime() + (timeUpdateCounter * 0);
+    
+    if (diffMs <= 0) return 'Expired';
+    
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    
+    if (diffHours > 0) {
+      return `${diffHours}h ${diffMinutes}m remaining`;
+    } else {
+      return `${diffMinutes}m remaining`;
+    }
+  }
+
+  // Update the remaining time display every minute
+  useEffect(() => {
+    timeUpdateIntervalRef.current = setInterval(() => {
+      if (mountedRef.current && vips.some(vip => vip.isChannelPointsVIP && vip.expiresAt)) {
+        setTimeUpdateCounter(prev => prev + 1);
+      }
+    }, 60000); // Update every minute
+
+    return () => {
+      if (timeUpdateIntervalRef.current) {
+        clearInterval(timeUpdateIntervalRef.current);
+      }
+    };
+  }, [vips]);
 
   // Loading state
   if (isLoading && vips.length === 0) {
@@ -415,34 +488,35 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
                       />
                     </div>
                   )}
-                  <div>
-                    <h3 className="font-medium text-[var(--card-foreground)]">
-                      {vip.displayName}
+                  <div className="flex flex-col">
+                    <div className="flex items-center">
+                      <span className="font-semibold">{vip.displayName}</span>
                       {vip.isChannelPointsVIP && (
                         <span className="ml-2 text-xs px-2 py-0.5 bg-[var(--primary)] text-white rounded-full">
                           Channel Points
                         </span>
                       )}
-                    </h3>
+                    </div>
+                    <span className="text-sm text-[var(--muted-foreground)]">@{vip.username}</span>
                     {vip.isChannelPointsVIP && vip.expiresAt && (
-                      <p className="text-sm text-[var(--muted-foreground)]">
-                        {calculateTimeRemaining(new Date(vip.expiresAt))}
-                      </p>
+                      <span className="text-xs text-[var(--muted-foreground)] mt-1">
+                        {formatRemainingTime(vip.expiresAt)}
+                      </span>
                     )}
-                    <p className="text-xs text-[var(--muted-foreground)]">
-                      @{vip.username}
-                    </p>
                   </div>
                 </div>
-                {vip.isChannelPointsVIP && vip.sessionId && (
-                  <Button
-                    onClick={() => handleRemoveVIP(vip)}
-                    className="bg-[var(--destructive)] text-[var(--destructive-foreground)] hover:bg-opacity-90"
-                    size="sm"
-                  >
-                    Remove VIP
-                  </Button>
-                )}
+                <div className="flex items-center gap-2 mt-2">
+                  {vip.isChannelPointsVIP && vip.sessionId && (
+                    <Button
+                      onClick={() => handleExtendVIP(vip)}
+                      className="bg-[var(--primary)] text-[var(--primary-foreground)] hover:bg-opacity-90"
+                      size="sm"
+                      title="Extend VIP status by 12 hours"
+                    >
+                      Extend
+                    </Button>
+                  )}
+                </div>
               </div>
             ))}
           </div>

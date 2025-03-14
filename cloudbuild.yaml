@@ -19,12 +19,26 @@ steps:
       - 'DISCORD_WEBHOOK_URL=${_DISCORD_WEBHOOK_URL}'
       - 'NOTIFICATION_EMAIL=${_NOTIFICATION_EMAIL}'
 
-  # Build and push the container image
+  # Build and push the container image with build args
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
       - '-t'
       - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE_NAME}'
+      - '--build-arg'
+      - 'NEXTAUTH_SECRET=${_NEXTAUTH_SECRET}'
+      - '--build-arg'
+      - 'NEXTAUTH_URL=${_NEXTAUTH_URL}'
+      - '--build-arg'
+      - 'DATABASE_URL=${_DATABASE_URL}'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_TWITCH_CLIENT_ID=${_NEXT_PUBLIC_TWITCH_CLIENT_ID}'
+      - '--build-arg'
+      - 'TWITCH_CLIENT_SECRET=${_TWITCH_CLIENT_SECRET}'
+      - '--build-arg'
+      - 'DISCORD_WEBHOOK_URL=${_DISCORD_WEBHOOK_URL}'
+      - '--build-arg'
+      - 'NOTIFICATION_EMAIL=${_NOTIFICATION_EMAIL}'
       - '.'
 
   # Push the container image

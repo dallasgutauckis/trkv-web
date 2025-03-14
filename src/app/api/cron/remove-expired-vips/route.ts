@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { removeVIPStatus } from '@/lib/twitch';
 import { getActiveVIPSessions, deactivateVIPSession, logAuditEvent } from '@/lib/db';
-import { broadcastToChannel } from '@/app/api/ws/route';
 import type { VIPSession } from '@/types/database';
+import { broadcastToChannel } from '@/lib/sse';
 
 // Verify request is from Cloud Scheduler
 async function isAuthorizedRequest() {
@@ -20,7 +20,6 @@ export async function POST() {
 
     const now = new Date();
     const channels = new Map<string, VIPSession[]>();
-    const processedChannels = new Set<string>();
 
     // Get all active VIP sessions
     const allActiveSessions = await getActiveVIPSessions('');
@@ -36,8 +35,6 @@ export async function POST() {
 
     // Process expired sessions for each channel
     for (const [channelId, sessions] of channels.entries()) {
-      let channelUpdated = false;
-      
       for (const session of sessions) {
         // Remove VIP status
         const success = await removeVIPStatus(channelId, session.userId);
@@ -45,7 +42,6 @@ export async function POST() {
         if (success) {
           // Deactivate VIP session
           await deactivateVIPSession(session.id);
-          channelUpdated = true;
 
           // Log audit event
           await logAuditEvent({
@@ -62,27 +58,11 @@ export async function POST() {
           });
         }
       }
-      
-      // If any VIPs were removed, broadcast the update to connected clients
-      if (channelUpdated) {
-        processedChannels.add(channelId);
-        
-        // Get updated VIP list for this channel
-        const updatedSessions = await getActiveVIPSessions(channelId);
-        
-        // Broadcast the update
-        broadcastToChannel(channelId, {
-          type: 'vip_update',
-          vips: updatedSessions,
-          timestamp: new Date().toISOString(),
-          source: 'cron_job'
-        });
-      }
     }
 
     return NextResponse.json({
       success: true,
-      processedChannels: processedChannels.size,
+      processedChannels: channels.size,
       totalSessions: Array.from(channels.values()).flat().length,
     });
   } catch (error) {

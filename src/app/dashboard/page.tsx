@@ -17,8 +17,21 @@ export default async function DashboardPage() {
     redirect("/auth/signin");
   }
 
-  if (!session.user?.id || !session.accessToken) {
-    throw new Error("Missing required session data");
+  // Log session data for debugging
+  console.log("Dashboard session data:", JSON.stringify({
+    ...session,
+    accessToken: session.accessToken ? `${session.accessToken.toString().substring(0, 10)}...` : undefined
+  }));
+
+  // Handle missing session data more gracefully
+  if (!session.user?.id) {
+    console.error("Missing user ID in session");
+    redirect("/auth/signin?error=missing_user_id");
+  }
+
+  if (!session.accessToken) {
+    console.error("Missing access token in session");
+    redirect("/auth/signin?error=missing_access_token");
   }
 
   return (
