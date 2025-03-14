@@ -166,19 +166,19 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
   };
 
   if (isLoading) {
-    return <div className="text-center py-8">Loading VIP list...</div>;
+    return <div className="text-center py-8 text-[var(--muted-foreground)]">Loading VIP list...</div>;
   }
 
   if (error) {
     return (
-      <div className="text-center py-8 text-red-500">
-        <p>Error: {error}</p>
+      <div className="text-center py-8">
+        <p className="text-[var(--destructive)]">Error: {error}</p>
         <Button 
           onClick={() => {
             fetchVIPs();
             connectSSE();
           }}
-          className="mt-4"
+          className="mt-4 bg-[var(--primary)] text-[var(--primary-foreground)] hover:bg-opacity-90"
         >
           Retry
         </Button>
@@ -189,14 +189,14 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h2 className="text-xl font-semibold">Active VIPs</h2>
+        <h2 className="text-xl font-semibold text-[var(--card-foreground)]">Active VIPs</h2>
         <div className="flex items-center gap-2">
           <div className={`h-2 w-2 rounded-full ${
-            sseStatus === 'connected' ? 'bg-green-500' : 
-            sseStatus === 'connecting' ? 'bg-yellow-500' : 
-            'bg-red-500'
+            sseStatus === 'connected' ? 'bg-[var(--success)]' : 
+            sseStatus === 'connecting' ? 'bg-[var(--warning)]' : 
+            'bg-[var(--destructive)]'
           }`} />
-          <span className="text-sm text-gray-500">
+          <span className="text-sm text-[var(--muted-foreground)]">
             {sseStatus === 'connected' ? 'Live Updates' : 
              sseStatus === 'connecting' ? 'Connecting...' : 
              'Updates Paused'}
@@ -205,28 +205,28 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
       </div>
 
       {vips.length === 0 ? (
-        <div className="text-center py-8 text-gray-500">
+        <div className="text-center py-8 text-[var(--muted-foreground)]">
           No active VIPs at the moment
         </div>
       ) : (
-        <div className="divide-y">
+        <div className="divide-y divide-[var(--border)]">
           {vips.map((vip) => (
             <div
               key={vip.id}
               className="py-4 flex items-center justify-between"
             >
               <div>
-                <h3 className="font-medium">{vip.username}</h3>
-                <p className="text-sm text-gray-500">
+                <h3 className="font-medium text-[var(--card-foreground)]">{vip.username}</h3>
+                <p className="text-sm text-[var(--muted-foreground)]">
                   {calculateTimeRemaining(new Date(vip.expiresAt))}
                 </p>
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-[var(--muted-foreground)]">
                   Via: {vip.redeemedWith === "channel_points" ? "Channel Points" : "Manual"}
                 </p>
               </div>
               <Button
                 onClick={() => handleRemoveVIP(vip)}
-                variant="destructive"
+                className="bg-[var(--destructive)] text-[var(--destructive-foreground)] hover:bg-opacity-90"
                 size="sm"
               >
                 Remove VIP

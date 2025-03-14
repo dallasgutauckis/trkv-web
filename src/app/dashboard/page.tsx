@@ -22,20 +22,20 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div className="container mx-auto py-10">
-      <h1 className="text-4xl font-bold mb-8">Dashboard</h1>
+    <div className="container mx-auto py-10 px-4">
+      <h1 className="text-4xl font-bold mb-8 text-[var(--foreground)]">Dashboard</h1>
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        <div className="p-6 bg-white rounded-lg shadow-sm border">
-          <h2 className="text-xl font-semibold mb-4">Active VIPs</h2>
+        <div className="p-6 bg-[var(--card)] rounded-lg shadow-sm border border-[var(--border)] card-hover">
+          <h2 className="text-xl font-semibold mb-4 text-[var(--card-foreground)]">Active VIPs</h2>
           <VIPList initialChannelId={session.user.id} />
         </div>
-        <div className="p-6 bg-white rounded-lg shadow-sm border">
-          <h2 className="text-xl font-semibold mb-4">Channel Point Settings</h2>
+        <div className="p-6 bg-[var(--card)] rounded-lg shadow-sm border border-[var(--border)] card-hover">
+          <h2 className="text-xl font-semibold mb-4 text-[var(--card-foreground)]">Channel Point Settings</h2>
           <ChannelPointsForm initialChannelId={session.user.id} initialAccessToken={session.accessToken} />
         </div>
-        <div className="p-6 bg-white rounded-lg shadow-sm border">
-          <h2 className="text-xl font-semibold mb-4">Statistics</h2>
-          <p className="text-gray-600">Coming soon...</p>
+        <div className="p-6 bg-[var(--card)] rounded-lg shadow-sm border border-[var(--border)] card-hover">
+          <h2 className="text-xl font-semibold mb-4 text-[var(--card-foreground)]">Statistics</h2>
+          <p className="text-[var(--muted-foreground)]">Coming soon...</p>
         </div>
       </div>
     </div>

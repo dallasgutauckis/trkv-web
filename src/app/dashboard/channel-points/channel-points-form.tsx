@@ -116,7 +116,7 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
   return (
     <div className="space-y-6">
       {error && (
-        <div className="p-4 text-sm text-red-700 bg-red-100 rounded-lg">
+        <div className="p-4 text-sm bg-[var(--destructive)] bg-opacity-10 text-[var(--destructive)] rounded-lg">
           {error}
         </div>
       )}
@@ -125,7 +125,7 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
         <div>
           <label
             htmlFor="reward"
-            className="block text-sm font-medium text-gray-700"
+            className="block text-sm font-medium text-[var(--card-foreground)]"
           >
             Select Existing Reward
           </label>
@@ -133,7 +133,7 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
             id="reward"
             value={selectedRewardId}
             onChange={(e) => setSelectedRewardId(e.target.value)}
-            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+            className="mt-1 block w-full rounded-md border border-[var(--border)] bg-[var(--input)] text-[var(--input-foreground)] px-3 py-2 text-sm focus:border-[var(--ring)] focus:outline-none focus:ring-1 focus:ring-[var(--ring)]"
             disabled={isFetching}
           >
             <option value="">
@@ -149,7 +149,7 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
               </option>
             ))}
           </select>
-          <p className="mt-1 text-sm text-gray-500">
+          <p className="mt-1 text-sm text-[var(--muted-foreground)]">
             {isFetching ? "Loading rewards..." :
               rewards.length > 0 
                 ? `${rewards.length} existing reward${rewards.length === 1 ? '' : 's'} found` 
@@ -159,13 +159,22 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
         </div>
 
         {selectedReward && (
-          <div className="p-4 rounded-md border border-gray-200">
-            <h3 className="font-medium mb-2">Selected Reward Details</h3>
-            <p><strong>Title:</strong> {selectedReward.title}</p>
-            <p><strong>Cost:</strong> {selectedReward.cost.toLocaleString()} points</p>
-            <p><strong>Status:</strong> {selectedReward.isEnabled ? 'Enabled' : 'Disabled'}</p>
+          <div className="p-4 rounded-md border border-[var(--border)] bg-[var(--accent)] bg-opacity-50">
+            <h3 className="font-medium mb-2 text-[var(--card-foreground)]">Selected Reward Details</h3>
+            <p className="text-[var(--card-foreground)]"><strong>Title:</strong> {selectedReward.title}</p>
+            <p className="text-[var(--card-foreground)]"><strong>Cost:</strong> {selectedReward.cost.toLocaleString()} points</p>
+            <p className="text-[var(--card-foreground)]"><strong>Status:</strong> {selectedReward.isEnabled ? 'Enabled' : 'Disabled'}</p>
             {selectedReward.prompt && (
-              <p><strong>Description:</strong> {selectedReward.prompt}</p>
+              <p className="text-[var(--card-foreground)]"><strong>Description:</strong> {selectedReward.prompt}</p>
+            )}
+            {selectedReward.backgroundColor && (
+              <div className="mt-2 flex items-center">
+                <span className="text-[var(--card-foreground)] mr-2"><strong>Color:</strong></span>
+                <div 
+                  className="w-6 h-6 rounded-full border border-[var(--border)]" 
+                  style={{ backgroundColor: selectedReward.backgroundColor }}
+                ></div>
+              </div>
             )}
           </div>
         )}
