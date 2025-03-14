@@ -178,12 +178,25 @@ export const authOptions: NextAuthOptions = {
         access_token: account.access_token ? `${account.access_token.substring(0, 10)}...` : undefined
       }) : "undefined");
       
+      // Initial sign in
       if (account) {
-        token.accessToken = account.access_token;
-        token.refreshToken = account.refresh_token;
-        token.id = account.providerAccountId;
+        return {
+          accessToken: account.access_token,
+          refreshToken: account.refresh_token,
+          accessTokenExpires: account.expires_at ? account.expires_at * 1000 : Date.now() + 3600 * 1000,
+          user: token.user,
+          id: account.providerAccountId
+        };
       }
-      return token;
+
+      // Return previous token if the access token has not expired yet
+      if (Date.now() < (token.accessTokenExpires as number)) {
+        return token;
+      }
+      
+      // Access token has expired, try to refresh it
+      console.log("Access token has expired, refreshing...");
+      return refreshAccessToken(token);
     },
     async session({ session, token }) {
       console.log("Session callback called with token:", token ? JSON.stringify({
@@ -202,4 +215,49 @@ export const authOptions: NextAuthOptions = {
     signIn: '/auth/signin',
     error: '/auth/error',
   },
-}; 
+};
+
+async function refreshAccessToken(token: any) {
+  try {
+    console.log("Refreshing access token...");
+    
+    const response = await fetch("https://id.twitch.tv/oauth2/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        client_id: TWITCH_CONFIG.clientId,
+        client_secret: TWITCH_CONFIG.clientSecret,
+        grant_type: "refresh_token",
+        refresh_token: token.refreshToken as string,
+      }),
+    });
+
+    const refreshedTokens = await response.json();
+    console.log("Token refresh response:", JSON.stringify({
+      ...refreshedTokens,
+      access_token: refreshedTokens.access_token ? `${refreshedTokens.access_token.substring(0, 10)}...` : undefined,
+      refresh_token: refreshedTokens.refresh_token ? `${refreshedTokens.refresh_token.substring(0, 10)}...` : undefined
+    }));
+
+    if (!response.ok) {
+      throw refreshedTokens;
+    }
+
+    return {
+      ...token,
+      accessToken: refreshedTokens.access_token,
+      refreshToken: refreshedTokens.refresh_token ?? token.refreshToken,
+      accessTokenExpires: Date.now() + refreshedTokens.expires_in * 1000,
+    };
+  } catch (error) {
+    console.error("Error refreshing access token:", error);
+    
+    // The error property is used by next-auth to trigger a session update
+    return {
+      ...token,
+      error: "RefreshAccessTokenError",
+    };
+  }
+} 

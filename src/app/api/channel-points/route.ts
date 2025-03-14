@@ -115,7 +115,7 @@ export async function GET(req: Request) {
     console.log("Using access token:", accessToken.slice(0, 10) + '...');
     
     try {
-      const rewards = await getChannelPointRewards(channelId, accessToken);
+      const rewards = await getChannelPointRewards(accessToken, channelId);
       
       // Log the rewards data for debugging
       console.log("Rewards from Twitch API:", JSON.stringify(rewards, null, 2));
