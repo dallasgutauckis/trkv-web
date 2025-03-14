@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { toast } from "react-hot-toast";
 import { Button } from "@/components/ui/button";
@@ -14,45 +14,94 @@ interface VIPListProps {
 }
 
 export default function VIPList({ initialChannelId }: VIPListProps) {
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus, update: updateSession } = useSession();
   const [vips, setVips] = useState<EnhancedVIP[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sseStatus, setSseStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
   const eventSourceRef = useRef<EventSource | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const reconnectAttemptsRef = useRef(0);
-  const MAX_RECONNECT_ATTEMPTS = 5;
-  const RECONNECT_INTERVAL = 3000; // 3 seconds
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const mountedRef = useRef(false);
+  const sessionRetryCountRef = useRef(0);
+  const sessionRetryTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const fetchVIPs = useCallback(async () => {
-    if (!initialChannelId || !session?.accessToken) return;
+  // Function to refresh the session
+  async function refreshSession() {
+    try {
+      await updateSession();
+    } catch (error) {
+      console.error("Error refreshing session:", error);
+    }
+  }
+
+  // Function to fetch VIPs
+  async function fetchVIPs(showLoading = true) {
+    if (!initialChannelId) return;
+    
+    if (!session?.accessToken) {
+      // If session is authenticated but no access token, try to refresh the session
+      if (sessionStatus === 'authenticated' && sessionRetryCountRef.current < 5) {
+        sessionRetryCountRef.current++;
+        
+        if (sessionRetryTimerRef.current) {
+          clearTimeout(sessionRetryTimerRef.current);
+        }
+        
+        sessionRetryTimerRef.current = setTimeout(() => {
+          refreshSession();
+          sessionRetryTimerRef.current = null;
+        }, 1000);
+      }
+      
+      return;
+    }
+    
+    if (!mountedRef.current) return;
+    
+    if (showLoading) {
+      setIsLoading(true);
+    }
     
     try {
-      setIsLoading(true);
-      const response = await fetch(`/api/vip?channelId=${initialChannelId}&includeAllVips=true`, {
+      // Use absolute URL to ensure it works in all environments
+      const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+      const url = `${baseUrl}/api/vip?channelId=${initialChannelId}&includeAllVips=true&_=${Date.now()}`;
+      
+      const response = await fetch(url, {
         headers: {
           "Authorization": `Bearer ${session.accessToken}`,
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+          "Expires": "0"
         },
       });
 
       if (!response.ok) {
-        throw new Error("Failed to fetch VIPs");
+        throw new Error(`Failed to fetch VIPs: ${response.status} ${response.statusText}`);
       }
 
       const data = await response.json();
-      setVips(data);
-      setError(null);
+      
+      if (mountedRef.current) {
+        setVips(data);
+        setError(null);
+      }
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Failed to load VIPs");
       console.error("Error fetching VIPs:", error);
+      
+      if (mountedRef.current) {
+        setError(error instanceof Error ? error.message : "Failed to load VIPs");
+      }
     } finally {
-      setIsLoading(false);
+      if (mountedRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, [initialChannelId, session?.accessToken]);
+  }
 
-  const connectSSE = useCallback(() => {
-    if (!initialChannelId || !session?.accessToken || typeof window === 'undefined') {
+  // Function to connect to SSE
+  function connectToSSE() {
+    if (!initialChannelId || !session?.accessToken || typeof window === 'undefined' || !mountedRef.current) {
       return;
     }
 
@@ -64,30 +113,33 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
 
     try {
       setSseStatus('connecting');
-      const url = `/api/ws?channelId=${initialChannelId}&token=${encodeURIComponent(session.accessToken)}`;
+      
+      // Use the full URL to avoid issues with relative URLs
+      const baseUrl = window.location.origin;
+      const url = `${baseUrl}/api/ws?channelId=${initialChannelId}&token=${encodeURIComponent(session.accessToken)}&_=${Date.now()}`;
+      
       const eventSource = new EventSource(url);
       eventSourceRef.current = eventSource;
 
       eventSource.onopen = () => {
-        console.log('SSE connection opened');
-        setSseStatus('connected');
-        reconnectAttemptsRef.current = 0; // Reset reconnect attempts on successful connection
+        if (mountedRef.current) {
+          setSseStatus('connected');
+          // Fetch VIPs when connection is established
+          fetchVIPs(false);
+        }
       };
 
       eventSource.onmessage = (event) => {
+        if (!mountedRef.current) return;
+        
         try {
           const data = JSON.parse(event.data);
-          console.log('SSE message received:', data);
           
           if (data.type === 'connection_established') {
-            console.log('SSE connection confirmed by server');
-            toast.success('Connected to real-time updates');
-          } else if (data.type === 'ping') {
-            // Server ping to keep connection alive, no action needed
-            console.log('Received server ping');
+            setSseStatus('connected');
+            fetchVIPs(false);
           } else if (data.type === 'vip_update') {
-            // When we get an update, refresh the full list to include all VIPs
-            fetchVIPs();
+            fetchVIPs(false);
           }
         } catch (error) {
           console.error('Error processing SSE message:', error);
@@ -96,57 +148,116 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
 
       eventSource.onerror = (error) => {
         console.error('SSE error:', error);
-        setSseStatus('error');
-        
-        // Close the connection on error
-        eventSource.close();
-        eventSourceRef.current = null;
-        
-        // Attempt to reconnect unless we've reached max attempts
-        if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
-          reconnectAttemptsRef.current += 1;
-          console.log(`Attempting to reconnect (${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})...`);
+        if (mountedRef.current) {
+          setSseStatus('error');
           
-          if (reconnectTimeoutRef.current) {
-            clearTimeout(reconnectTimeoutRef.current);
+          // Close the connection on error
+          eventSource.close();
+          eventSourceRef.current = null;
+          
+          // Set up polling as fallback
+          if (!pollingIntervalRef.current) {
+            pollingIntervalRef.current = setInterval(() => {
+              if (mountedRef.current) {
+                fetchVIPs(false);
+              }
+            }, 30000);
           }
-          
-          reconnectTimeoutRef.current = setTimeout(() => {
-            toast.error('Lost connection to server. Reconnecting...');
-            connectSSE();
-          }, RECONNECT_INTERVAL);
-        } else if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
-          toast.error('Could not connect to server after multiple attempts');
-          setError('Connection to server failed. Please refresh the page to try again.');
         }
       };
     } catch (error) {
       console.error('Error setting up SSE:', error);
-      setSseStatus('error');
-      setError('Failed to connect to real-time updates');
+      if (mountedRef.current) {
+        setSseStatus('error');
+      }
     }
-  }, [initialChannelId, session?.accessToken, fetchVIPs]);
+  }
 
+  // Handle component mount and unmount
   useEffect(() => {
-    fetchVIPs();
-    connectSSE();
-
+    mountedRef.current = true;
+    
+    // Immediate fetch attempt on mount
+    const immediateLoad = async () => {
+      // Wait a bit to ensure session is loaded
+      await new Promise(resolve => setTimeout(resolve, 500));
+      if (mountedRef.current) {
+        fetchVIPs(true);
+      }
+    };
+    
+    immediateLoad();
+    
+    // Set up polling as a fallback
+    pollingIntervalRef.current = setInterval(() => {
+      if (mountedRef.current) {
+        fetchVIPs(false);
+      }
+    }, 60000);
+    
     return () => {
-      // Clean up SSE connection and any pending reconnect attempts
+      mountedRef.current = false;
+      
+      // Clean up SSE connection
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
       }
       
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
+      // Clean up polling interval
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+      
+      // Clean up session retry timer
+      if (sessionRetryTimerRef.current) {
+        clearTimeout(sessionRetryTimerRef.current);
+        sessionRetryTimerRef.current = null;
       }
     };
-  }, [fetchVIPs, connectSSE]);
+  }, []);
 
-  const handleRemoveVIP = async (vip: EnhancedVIP) => {
-    if (!initialChannelId || !vip.sessionId) return;
+  // Fetch data when session becomes available
+  useEffect(() => {
+    if (sessionStatus === 'authenticated' && mountedRef.current) {
+      if (session?.accessToken) {
+        fetchVIPs(true);
+        connectToSSE();
+      } else {
+        // Try to refresh the session to get the access token
+        refreshSession();
+      }
+    }
+  }, [sessionStatus, session?.accessToken, initialChannelId]);
+
+  // Handle visibility change
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && mountedRef.current) {
+        // If we don't have an access token, try to refresh the session
+        if (!session?.accessToken && sessionStatus === 'authenticated') {
+          refreshSession();
+        } else {
+          fetchVIPs(true);
+          
+          if (!eventSourceRef.current || sseStatus !== 'connected') {
+            connectToSSE();
+          }
+        }
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [sseStatus, session?.accessToken, sessionStatus]);
+
+  // Handle removing a VIP
+  async function handleRemoveVIP(vip: EnhancedVIP) {
+    if (!initialChannelId || !vip.sessionId || !mountedRef.current) return;
 
     try {
       const response = await fetch(
@@ -159,32 +270,70 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
       if (!response.ok) throw new Error("Failed to remove VIP");
 
       toast.success(`Removed VIP status from ${vip.displayName}`);
-      
-      // Refresh the VIP list immediately instead of waiting for SSE
-      fetchVIPs();
+      fetchVIPs(true);
     } catch (error) {
       toast.error("Failed to remove VIP status");
       console.error("Error removing VIP:", error);
     }
-  };
-
-  if (isLoading) {
-    return <div className="text-center py-8 text-[var(--muted-foreground)]">Loading VIP list...</div>;
   }
 
-  if (error) {
+  // Loading state
+  if (isLoading && vips.length === 0) {
+    return (
+      <div className="text-center py-8 space-y-2">
+        <div className="text-[var(--muted-foreground)]">Loading VIP list...</div>
+        <div className="text-xs text-[var(--muted-foreground)]">
+          {sessionStatus === 'loading' ? 'Waiting for session...' : 
+           sessionStatus === 'authenticated' && !session?.accessToken ? 'Session authenticated but missing token...' :
+           sessionStatus === 'authenticated' ? 'Session ready, fetching data...' : 
+           'Session not authenticated'}
+        </div>
+        <div className="flex justify-center gap-2">
+          <Button 
+            onClick={() => fetchVIPs(true)}
+            className="mt-4 bg-[var(--primary)] text-[var(--primary-foreground)] hover:bg-opacity-90"
+            size="sm"
+          >
+            Refresh Now
+          </Button>
+          {sessionStatus === 'authenticated' && !session?.accessToken && (
+            <Button 
+              onClick={refreshSession}
+              className="mt-4 bg-[var(--primary)] text-[var(--primary-foreground)] hover:bg-opacity-90"
+              size="sm"
+            >
+              Refresh Session
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error && vips.length === 0) {
     return (
       <div className="text-center py-8">
         <p className="text-[var(--destructive)]">Error: {error}</p>
-        <Button 
-          onClick={() => {
-            fetchVIPs();
-            connectSSE();
-          }}
-          className="mt-4 bg-[var(--primary)] text-[var(--primary-foreground)] hover:bg-opacity-90"
-        >
-          Retry
-        </Button>
+        <div className="flex justify-center gap-2">
+          <Button 
+            onClick={() => {
+              fetchVIPs(true);
+              connectToSSE();
+            }}
+            className="mt-4 bg-[var(--primary)] text-[var(--primary-foreground)] hover:bg-opacity-90"
+          >
+            Retry
+          </Button>
+          {sessionStatus === 'authenticated' && !session?.accessToken && (
+            <Button 
+              onClick={refreshSession}
+              className="mt-4 bg-[var(--primary)] text-[var(--primary-foreground)] hover:bg-opacity-90"
+            >
+              Refresh Session
+            </Button>
+          )}
+        </div>
       </div>
     );
   }
@@ -213,6 +362,24 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
       {vips.length === 0 ? (
         <div className="text-center py-8 text-[var(--muted-foreground)]">
           No active VIPs at the moment
+          <div className="flex justify-center gap-2 mt-2">
+            <Button 
+              onClick={() => fetchVIPs(true)}
+              className="bg-[var(--primary)] text-[var(--primary-foreground)] hover:bg-opacity-90"
+              size="sm"
+            >
+              Refresh
+            </Button>
+            {sessionStatus === 'authenticated' && !session?.accessToken && (
+              <Button 
+                onClick={refreshSession}
+                className="bg-[var(--primary)] text-[var(--primary-foreground)] hover:bg-opacity-90"
+                size="sm"
+              >
+                Refresh Session
+              </Button>
+            )}
+          </div>
         </div>
       ) : (
         <>
@@ -220,6 +387,13 @@ export default function VIPList({ initialChannelId }: VIPListProps) {
             <div className="text-sm text-[var(--muted-foreground)]">
               {vips.length} total VIPs • {channelPointsVIPCount} via Channel Points
             </div>
+            <Button 
+              onClick={() => fetchVIPs(true)}
+              className="bg-[var(--primary)] text-[var(--primary-foreground)] hover:bg-opacity-90"
+              size="sm"
+            >
+              Refresh
+            </Button>
           </div>
           
           <div className="divide-y divide-[var(--border)]">
