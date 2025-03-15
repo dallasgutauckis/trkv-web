@@ -213,13 +213,14 @@ export const authOptions: NextAuthOptions = {
         accessToken: token.accessToken ? `${token.accessToken.toString().substring(0, 10)}...` : undefined
       }) : "undefined");
       
-      // Ensure session has user object
+      // Ensure session has user object with required id
       if (!session.user) {
-        session.user = {};
+        session.user = { id: token.id as string };
+      } else if (!session.user.id) {
+        session.user.id = token.id as string;
       }
       
-      // Set user ID and access token
-      session.user.id = token.id as string;
+      // Set access token
       session.accessToken = token.accessToken as string;
       
       // Add username to session if available
