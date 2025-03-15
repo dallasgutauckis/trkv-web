@@ -1,4 +1,4 @@
-import type { User, VIPSession, AuditLog, ChannelPointReward, UserSettings } from '@/types/database';
+import type { User, VIPSession, AuditLog, ChannelPointReward, UserSettings, UserTokens, RedemptionMonitor } from '@/types/database';
 import { db } from './firebase';
 import { FieldValue } from 'firebase-admin/firestore';
 
@@ -7,6 +7,7 @@ const usersCollection = db.collection('users');
 const vipSessionsCollection = db.collection('vipSessions');
 const auditLogsCollection = db.collection('auditLogs');
 const channelPointRewardsCollection = db.collection('channelPointRewards');
+const redemptionMonitorsCollection = db.collection('redemptionMonitors');
 
 // In-memory cache for frequently accessed data
 const userCache = new Map<string, User>();
@@ -68,6 +69,105 @@ export async function createUser(user: Omit<User, 'id' | 'createdAt' | 'updatedA
   } catch (error) {
     console.error('Error creating user:', error);
     throw error;
+  }
+}
+
+/**
+ * Update user tokens
+ */
+export async function updateUserTokens(userId: string, tokens: {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: Date;
+  scope: string[];
+}): Promise<void> {
+  try {
+    const userRef = db.collection('users').doc(userId);
+    await userRef.update({
+      'tokens': tokens,
+      'updatedAt': new Date()
+    });
+  } catch (error) {
+    console.error(`Error updating tokens for user ${userId}:`, error);
+    throw error;
+  }
+}
+
+export async function getUserTokens(userId: string): Promise<UserTokens | null> {
+  try {
+    // Check cache first
+    if (userCache.has(userId)) {
+      const user = userCache.get(userId)!;
+      return user.tokens || null;
+    }
+    
+    // Get from database
+    const user = await getUser(userId);
+    return user?.tokens || null;
+  } catch (error) {
+    console.error(`Error getting tokens for user ${userId}:`, error);
+    return null;
+  }
+}
+
+export async function createRedemptionMonitor(monitor: Omit<RedemptionMonitor, 'id' | 'createdAt' | 'updatedAt'>): Promise<RedemptionMonitor> {
+  const now = new Date();
+  const monitorData: Omit<RedemptionMonitor, 'id'> = {
+    ...monitor,
+    createdAt: now,
+    updatedAt: now,
+  };
+  
+  try {
+    const monitorRef = redemptionMonitorsCollection.doc();
+    await monitorRef.set(monitorData);
+    
+    return { id: monitorRef.id, ...monitorData } as RedemptionMonitor;
+  } catch (error) {
+    console.error('Error creating redemption monitor:', error);
+    throw error;
+  }
+}
+
+export async function updateRedemptionMonitor(monitorId: string, isActive: boolean): Promise<void> {
+  try {
+    await redemptionMonitorsCollection.doc(monitorId).update({
+      isActive,
+      lastActive: new Date(),
+      updatedAt: FieldValue.serverTimestamp()
+    });
+  } catch (error) {
+    console.error(`Error updating redemption monitor ${monitorId}:`, error);
+    throw error;
+  }
+}
+
+export async function getActiveRedemptionMonitors(): Promise<RedemptionMonitor[]> {
+  try {
+    const snapshot = await redemptionMonitorsCollection
+      .where('isActive', '==', true)
+      .get();
+    
+    return snapshot.docs.map(doc => convertFirestoreDoc<RedemptionMonitor>(doc)!);
+  } catch (error) {
+    console.error('Error getting active redemption monitors:', error);
+    return [];
+  }
+}
+
+export async function getRedemptionMonitorByChannel(channelId: string): Promise<RedemptionMonitor | null> {
+  try {
+    const snapshot = await redemptionMonitorsCollection
+      .where('channelId', '==', channelId)
+      .limit(1)
+      .get();
+    
+    if (snapshot.empty) return null;
+    
+    return convertFirestoreDoc<RedemptionMonitor>(snapshot.docs[0]);
+  } catch (error) {
+    console.error(`Error getting redemption monitor for channel ${channelId}:`, error);
+    return null;
   }
 }
 
@@ -157,6 +257,9 @@ export async function logAuditEvent(event: Omit<AuditLog, 'id' | 'timestamp'>): 
     // Don't throw error for logging failures
   }
 }
+
+// Alias for backward compatibility
+export const logAuditLog = logAuditEvent;
 
 export async function getChannelPointReward(channelId: string): Promise<ChannelPointReward | null> {
   try {

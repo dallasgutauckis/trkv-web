@@ -1,11 +1,12 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
 import * as z from 'zod';
 import { grantVIPStatus, removeVIPStatus, isUserVIP, getAllChannelVIPs, TwitchVIP } from '@/lib/twitch';
-import { createVIPSession, deactivateVIPSession, getActiveVIPSessions, logAuditEvent } from '@/lib/db';
+import { createVIPSession, deactivateVIPSession, getActiveVIPSessions, logAuditEvent, getUser, updateVIPSessionExpiration } from '@/lib/db';
 import { broadcastToChannel } from '@/lib/sse';
 import { authOptions } from '@/lib/auth';
 import type { VIPSession } from '@/types/database';
+import { appClient } from '@/lib/twitch-server';
 
 const grantVIPSchema = z.object({
   userId: z.string(),
@@ -22,79 +23,112 @@ export interface EnhancedVIP {
   profileImageUrl: string;
   isChannelPointsVIP: boolean;
   expiresAt?: string;
-  redeemedWith?: string;
+  grantMethod?: string;
   sessionId?: string;
 }
 
-export async function POST(req: Request) {
+// Schema for validating the request body
+const vipSchema = z.object({
+  channelId: z.string(),
+  userId: z.string(),
+  username: z.string(),
+  grantedBy: z.string(),
+  grantMethod: z.enum(['manual', 'channelPoints', 'subscription', 'bits', 'other']).default('manual'),
+  metadata: z.record(z.any()).optional(),
+});
+
+const extendSchema = z.object({
+  sessionId: z.string(),
+  hours: z.number().default(12),
+});
+
+export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession();
-    if (!session) {
-      return new NextResponse('Unauthorized', { status: 401 });
+    // Check authentication
+    const session = await getServerSession(authOptions);
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const json = await req.json();
-    const body = grantVIPSchema.parse(json);
+    // Parse and validate request body
+    const body = await request.json();
+    const result = vipSchema.safeParse(body);
+    
+    if (!result.success) {
+      return NextResponse.json({ error: 'Invalid request body', details: result.error }, { status: 400 });
+    }
+    
+    const { channelId, userId, username, grantedBy, grantMethod, metadata } = result.data;
 
-    // Check if user is already a VIP
-    const isVip = await isUserVIP(body.channelId, body.userId);
-    if (isVip) {
-      return NextResponse.json(
-        { error: 'User is already a VIP' },
-        { status: 400 }
-      );
+    // Get user to verify ownership
+    const user = await getUser(session.user.id);
+    if (!user || (user.twitchId !== channelId && user.twitchId !== grantedBy)) {
+      return NextResponse.json({ error: 'Unauthorized to grant VIP status for this channel' }, { status: 403 });
     }
 
-    // Grant VIP status
-    const success = await grantVIPStatus(body.channelId, body.userId);
-    if (!success) {
-      return NextResponse.json(
-        { error: 'Failed to grant VIP status' },
-        { status: 500 }
-      );
-    }
-
-    // Create VIP session
+    // Get VIP duration from user settings
+    const vipDuration = user.settings.vipDuration || 12 * 60 * 60 * 1000; // Default to 12 hours
+    
+    // Calculate expiration date
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + 12 * 60 * 60 * 1000); // 12 hours
+    const expiresAt = new Date(now.getTime() + vipDuration);
 
-    const vipSession = await createVIPSession({
-      channelId: body.channelId,
-      userId: body.userId,
-      username: body.username,
-      startedAt: now,
-      expiresAt,
-      isActive: true,
-      redeemedWith: body.redeemedWith,
-    });
-
-    // Log audit event
-    await logAuditEvent({
-      channelId: body.channelId,
-      action: 'grant_vip',
-      targetUserId: body.userId,
-      targetUsername: body.username,
-      performedBy: session.user?.name || 'system',
-      details: {
-        redeemedWith: body.redeemedWith,
-        sessionId: vipSession.id,
-      },
-    });
-
-    // Get updated VIP list and broadcast
-    const activeSessions = await getActiveVIPSessions(body.channelId);
-    broadcastToChannel(body.channelId, {
-      type: 'vip_update',
-      vips: activeSessions,
-    });
-
-    return NextResponse.json(vipSession);
+    try {
+      // Grant VIP status via Twitch API
+      await appClient.channels.addVip(channelId, userId);
+      
+      // Create VIP session in database
+      const vipSession = await createVIPSession({
+        channelId,
+        userId,
+        username,
+        isActive: true,
+        grantedAt: now,
+        expiresAt,
+        grantedBy,
+        grantMethod,
+        metadata,
+      });
+      
+      // Log audit event
+      await logAuditEvent({
+        channelId,
+        action: 'grant_vip',
+        performedBy: grantedBy,
+        performedByUsername: user.username,
+        targetUserId: userId,
+        targetUsername: username,
+        details: {
+          grantMethod,
+          expiresAt,
+          metadata,
+        },
+      });
+      
+      return NextResponse.json({ 
+        success: true, 
+        session: vipSession,
+        message: `VIP status granted to ${username} until ${expiresAt.toISOString()}`
+      });
+    } catch (error: any) {
+      console.error('Error granting VIP status:', error);
+      
+      // Check if the error is because the user is already a VIP
+      if (error.message?.includes('already a VIP')) {
+        return NextResponse.json({ 
+          success: false, 
+          error: `${username} is already a VIP in this channel`
+        }, { status: 400 });
+      }
+      
+      return NextResponse.json({ 
+        success: false, 
+        error: `Failed to grant VIP status: ${error.message || 'Unknown error'}`
+      }, { status: 500 });
+    }
   } catch (error) {
-    console.error('Error in VIP POST:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    console.error('Error in VIP API:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -204,7 +238,7 @@ export async function GET(req: Request) {
         profileImageUrl: vip.profileImageUrl,
         isChannelPointsVIP: !!channelPointsSession,
         expiresAt: channelPointsSession?.expiresAt?.toISOString(),
-        redeemedWith: channelPointsSession?.redeemedWith,
+        grantMethod: channelPointsSession?.grantMethod,
         sessionId: channelPointsSession?.id
       };
     });
@@ -223,5 +257,58 @@ export async function GET(req: Request) {
       { error: 'Internal server error' },
       { status: 500 }
     );
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    // Check authentication
+    const session = await getServerSession(authOptions);
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Parse and validate request body
+    const body = await request.json();
+    const result = extendSchema.safeParse(body);
+    
+    if (!result.success) {
+      return NextResponse.json({ error: 'Invalid request body', details: result.error }, { status: 400 });
+    }
+    
+    const { sessionId, hours } = result.data;
+
+    // Update VIP session expiration
+    const updatedSession = await updateVIPSessionExpiration(
+      sessionId,
+      new Date(Date.now() + hours * 60 * 60 * 1000)
+    );
+    
+    if (!updatedSession) {
+      return NextResponse.json({ error: 'VIP session not found' }, { status: 404 });
+    }
+    
+    // Log audit event
+    await logAuditEvent({
+      channelId: updatedSession.channelId,
+      action: 'extend_vip',
+      performedBy: session.user.id,
+      performedByUsername: session.user.name || undefined,
+      targetUserId: updatedSession.userId,
+      targetUsername: updatedSession.username,
+      details: {
+        hours,
+        newExpiresAt: updatedSession.expiresAt,
+      },
+    });
+    
+    return NextResponse.json({ 
+      success: true, 
+      session: updatedSession,
+      message: `VIP status extended until ${updatedSession.expiresAt.toISOString()}`
+    });
+  } catch (error) {
+    console.error('Error extending VIP session:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 } 

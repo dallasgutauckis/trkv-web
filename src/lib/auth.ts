@@ -1,6 +1,7 @@
 import { NextAuthOptions } from "next-auth";
 import { TWITCH_CONFIG } from "@/config/twitch";
 import type { OAuthConfig, OAuthUserConfig } from "next-auth/providers/oauth";
+import { updateUserTokens } from '@/lib/db';
 
 // Helper function to log to Cloud Run logs
 const logToCloudRun = async (message: string, data?: any) => {
@@ -49,7 +50,8 @@ function CustomTwitchProvider(options: OAuthUserConfig<any>): OAuthConfig<any> {
       url: "https://id.twitch.tv/oauth2/authorize",
       params: {
         scope: TWITCH_CONFIG.scopes.join(" "),
-        response_type: "code"
+        response_type: "code",
+        force_verify: "true" // Force re-authentication to ensure we get all scopes
       }
     },
     token: {
@@ -173,7 +175,7 @@ export const authOptions: NextAuthOptions = {
     maxAge: 24 * 60 * 60, // 24 hours
   },
   callbacks: {
-    async jwt({ token, account, user }) {
+    async jwt({ token, account, user, profile }) {
       console.log("JWT callback called with account:", account ? JSON.stringify({
         ...account,
         access_token: account.access_token ? `${account.access_token.substring(0, 10)}...` : undefined
@@ -188,6 +190,21 @@ export const authOptions: NextAuthOptions = {
       
       // Initial sign in
       if (account) {
+        // Store tokens in the database
+        try {
+          if (account.access_token && account.refresh_token && account.expires_at) {
+            await updateUserTokens(token.id as string, {
+              accessToken: account.access_token,
+              refreshToken: account.refresh_token,
+              expiresAt: new Date(account.expires_at * 1000),
+              scope: account.scope?.split(' ') || [],
+            });
+            console.log(`Stored tokens for user ${token.id}`);
+          }
+        } catch (error) {
+          console.error('Error storing user tokens:', error);
+        }
+        
         return {
           accessToken: account.access_token,
           refreshToken: account.refresh_token,

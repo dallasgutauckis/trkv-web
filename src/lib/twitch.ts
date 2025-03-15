@@ -37,13 +37,50 @@ function createUserClient(accessToken: string) {
   return new ApiClient({ authProvider });
 }
 
-export async function grantVIPStatus(channelId: string, userId: string): Promise<boolean> {
+/**
+ * Grant VIP status to a user
+ */
+export async function grantVIPStatus({
+  channelId,
+  userId,
+  username,
+  grantedBy,
+  grantMethod = 'manual',
+  metadata = {}
+}: {
+  channelId: string;
+  userId: string;
+  username: string;
+  grantedBy: string;
+  grantMethod?: 'manual' | 'channelPoints' | 'subscription' | 'bits' | 'other';
+  metadata?: Record<string, any>;
+}) {
   try {
-    await appClient.channels.addVip(channelId, userId);
-    return true;
+    const response = await fetch('/api/vip', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        channelId,
+        userId,
+        username,
+        grantedBy,
+        grantMethod,
+        metadata
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      return { success: false, error: errorData.error || 'Failed to grant VIP status' };
+    }
+
+    const data = await response.json();
+    return { success: true, session: data.session };
   } catch (error) {
     console.error('Error granting VIP status:', error);
-    return false;
+    return { success: false, error: 'Failed to grant VIP status' };
   }
 }
 
@@ -164,5 +201,29 @@ export async function getChannelPointRewards(accessToken: string, channelId: str
   } catch (error) {
     console.error('Error fetching channel point rewards:', error);
     throw error;
+  }
+}
+
+/**
+ * Fetch channel point rewards for the current user
+ */
+export async function fetchChannelPointRewards() {
+  try {
+    const response = await fetch('/api/channel-points', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch channel point rewards');
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error fetching channel point rewards:', error);
+    return { success: false, error: 'Failed to fetch rewards' };
   }
 } 
