@@ -305,7 +305,7 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
   return (
     <div className="space-y-8">
       {error && (
-        <div className="p-4 text-sm bg-[var(--destructive)] bg-opacity-10 text-[var(--destructive)] rounded-lg">
+        <div className="p-4 text-sm bg-red-900/30 border border-red-800 text-red-300 rounded-lg">
           {error}
         </div>
       )}
@@ -314,7 +314,7 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
         <div>
           <label
             htmlFor="reward"
-            className="block text-sm font-medium text-[var(--card-foreground)]"
+            className="block text-sm font-medium"
           >
             Select Existing Reward
           </label>
@@ -322,7 +322,7 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
             id="reward"
             value={selectedRewardId}
             onChange={(e) => setSelectedRewardId(e.target.value)}
-            className="mt-1 block w-full rounded-md border border-[var(--border)] bg-[var(--input)] text-[var(--input-foreground)] px-3 py-2 text-sm focus:border-[var(--ring)] focus:outline-none focus:ring-1 focus:ring-[var(--ring)]"
+            className="mt-1 block w-full rounded-md border border-[#2F2F35] bg-[#1F1F23] text-[#EFEFF1] px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
             disabled={isFetching}
           >
             <option value="">
@@ -338,7 +338,7 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
               </option>
             ))}
           </select>
-          <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+          <p className="mt-1 text-sm text-muted-foreground">
             {isFetching ? "Loading rewards..." :
               rewards.length > 0 
                 ? `${rewards.length} existing reward${rewards.length === 1 ? '' : 's'} found` 
@@ -348,19 +348,19 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
         </div>
 
         {selectedReward && (
-          <div className="p-4 rounded-md border border-[var(--border)] bg-[var(--accent)] bg-opacity-50">
-            <h3 className="font-medium mb-2 text-[var(--card-foreground)]">Selected Reward Details</h3>
-            <p className="text-[var(--card-foreground)]"><strong>Title:</strong> {selectedReward.title}</p>
-            <p className="text-[var(--card-foreground)]"><strong>Cost:</strong> {selectedReward.cost.toLocaleString()} points</p>
-            <p className="text-[var(--card-foreground)]"><strong>Status:</strong> {selectedReward.isEnabled ? 'Enabled' : 'Disabled'}</p>
+          <div className="p-4 rounded-md border border-[#2F2F35] bg-[#1F1F23]">
+            <h3 className="font-medium mb-2">Selected Reward Details</h3>
+            <p><strong>Title:</strong> {selectedReward.title}</p>
+            <p><strong>Cost:</strong> {selectedReward.cost.toLocaleString()} points</p>
+            <p><strong>Status:</strong> {selectedReward.isEnabled ? 'Enabled' : 'Disabled'}</p>
             {selectedReward.prompt && (
-              <p className="text-[var(--card-foreground)]"><strong>Description:</strong> {selectedReward.prompt}</p>
+              <p><strong>Description:</strong> {selectedReward.prompt}</p>
             )}
             {selectedReward.backgroundColor && (
               <div className="mt-2 flex items-center">
-                <span className="text-[var(--card-foreground)] mr-2"><strong>Color:</strong></span>
+                <span className="mr-2"><strong>Color:</strong></span>
                 <div 
-                  className="w-6 h-6 rounded-full border border-[var(--border)]" 
+                  className="w-6 h-6 rounded-full border border-[#2F2F35]" 
                   style={{ backgroundColor: selectedReward.backgroundColor }}
                 ></div>
               </div>
@@ -370,7 +370,7 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
               <Button
                 onClick={handleSaveReward}
                 disabled={isSaving}
-                className="bg-[var(--primary)] text-[var(--primary-foreground)] hover:bg-opacity-90"
+                className="bg-purple-600 hover:bg-purple-700"
               >
                 {isSaving ? "Saving..." : "Save Selection"}
               </Button>
@@ -381,7 +381,7 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
       
       {/* Add monitoring settings section */}
       {selectedReward && (
-        <div className="mt-8 p-6 bg-card rounded-lg border shadow-sm">
+        <div className="mt-8 p-6 bg-[#1F1F23] rounded-lg border border-[#2F2F35] shadow-sm">
           <h3 className="text-xl font-semibold mb-4">Automatic VIP Granting</h3>
           <p className="text-muted-foreground mb-6">
             When enabled, viewers who redeem this reward will automatically be granted VIP status
@@ -406,6 +406,7 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
             <Button
               onClick={saveMonitoringSettings}
               disabled={isMonitoringSaving || !selectedReward}
+              className="bg-purple-600 hover:bg-purple-700"
             >
               {isMonitoringSaving ? 'Saving...' : 'Save Monitoring Settings'}
             </Button>
