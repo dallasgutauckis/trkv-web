@@ -57,6 +57,8 @@ export async function POST(req: Request) {
       return new NextResponse('Unauthorized', { status: 401 });
     }
 
+    console.log('Session data:', JSON.stringify(session, null, 2));
+
     const json = await req.json();
     const body = updateSettingsSchema.parse(json);
 
@@ -66,10 +68,17 @@ export async function POST(req: Request) {
       
       // Create user if not found
       if (!user) {
-        console.log(`User ${body.channelId} not found, creating new user record`);
+        // Extract username from session
+        const username = session.user?.name || 
+                        (session as any)?.username || 
+                        (session as any)?.user?.username || 
+                        'unknown';
+        
+        console.log(`User ${body.channelId} not found, creating new user record with username: ${username}`);
+        
         user = await createUser({
           twitchId: body.channelId,
-          username: session.user?.name || 'unknown',
+          username: username,
           email: session.user?.email || '',
           settings: {
             vipDuration: 12 * 60 * 60 * 1000, // 12 hours

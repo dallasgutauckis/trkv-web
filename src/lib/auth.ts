@@ -133,7 +133,8 @@ function CustomTwitchProvider(options: OAuthUserConfig<any>): OAuthConfig<any> {
       const userData = profile.data[0];
       return {
         id: userData.id,
-        name: userData.login || userData.display_name,
+        name: userData.display_name,
+        username: userData.login,
         email: userData.email,
         image: userData.profile_image_url,
       };
@@ -181,6 +182,8 @@ export const authOptions: NextAuthOptions = {
       // Save user data from initial sign in
       if (user) {
         token.id = user.id;
+        token.name = user.name;
+        token.username = user.username;
       }
       
       // Initial sign in
@@ -190,6 +193,8 @@ export const authOptions: NextAuthOptions = {
           refreshToken: account.refresh_token,
           accessTokenExpires: account.expires_at ? account.expires_at * 1000 : Date.now() + 3600 * 1000,
           id: account.providerAccountId || user?.id || token.id,
+          name: user?.name || token.name,
+          username: user?.username || token.username,
         };
       }
 
@@ -216,6 +221,16 @@ export const authOptions: NextAuthOptions = {
       // Set user ID and access token
       session.user.id = token.id as string;
       session.accessToken = token.accessToken as string;
+      
+      // Add username to session if available
+      if (token.name) {
+        session.user.name = token.name as string;
+      }
+      
+      // Add additional user data if available
+      if (token.username) {
+        session.user.username = token.username as string;
+      }
       
       console.log("Session after modification:", JSON.stringify({
         ...session,
@@ -249,26 +264,29 @@ async function refreshAccessToken(token: any) {
     });
 
     const refreshedTokens = await response.json();
-    console.log("Token refresh response:", JSON.stringify({
-      ...refreshedTokens,
-      access_token: refreshedTokens.access_token ? `${refreshedTokens.access_token.substring(0, 10)}...` : undefined,
-      refresh_token: refreshedTokens.refresh_token ? `${refreshedTokens.refresh_token.substring(0, 10)}...` : undefined
-    }));
 
     if (!response.ok) {
-      throw refreshedTokens;
+      console.error("Error refreshing access token:", refreshedTokens);
+      return {
+        ...token,
+        error: "RefreshAccessTokenError",
+      };
     }
+
+    console.log("Access token refreshed successfully");
 
     return {
       ...token,
       accessToken: refreshedTokens.access_token,
-      refreshToken: refreshedTokens.refresh_token ?? token.refreshToken,
+      refreshToken: refreshedTokens.refresh_token ?? token.refreshToken, // Fall back to old refresh token
       accessTokenExpires: Date.now() + refreshedTokens.expires_in * 1000,
+      // Preserve user information
+      id: token.id,
+      name: token.name,
+      username: token.username,
     };
   } catch (error) {
     console.error("Error refreshing access token:", error);
-    
-    // The error property is used by next-auth to trigger a session update
     return {
       ...token,
       error: "RefreshAccessTokenError",
