@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { getActiveListeners } from '@/services/twitch-eventsub';
+import { getUser } from '@/lib/db';
+import { getActiveListeners } from '@/services/eventsub-manager';
 
 export async function GET(request: NextRequest) {
   try {
@@ -15,27 +16,27 @@ export async function GET(request: NextRequest) {
     if (!session?.user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    
+
     // Get active listeners
-    const listeners = getActiveListeners();
+    const activeListeners = getActiveListeners();
     
     // Format the response
-    const formattedListeners = Array.from(listeners.entries()).map(([channelId, data]) => ({
+    const formattedListeners = Array.from(activeListeners.entries()).map(([channelId, data]) => ({
       channelId,
       rewardId: data.rewardId,
       isListenerActive: !!data.listener,
-      hasSubscription: !!data.subscription,
+      hasSubscription: !!data.subscription
     }));
     
     return NextResponse.json({ 
-      activeListeners: formattedListeners,
+      listeners: formattedListeners,
       count: formattedListeners.length
     });
   } catch (error) {
-    console.error('Error getting EventSub debug info:', error);
+    console.error('Error getting active listeners:', error);
     return NextResponse.json({ 
       error: 'Internal server error',
-      message: 'Failed to get EventSub debug info',
+      message: 'Failed to get active listeners',
       details: String(error)
     }, { status: 500 });
   }

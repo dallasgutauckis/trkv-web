@@ -1,10 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { getUser } from '@/lib/db';
+import { getUser, updateVIPSessionExpiration, createVIPSession } from '@/lib/db';
 import { db } from '@/lib/firebase';
+import { z } from 'zod';
 
-// Create a local audit log function
+// Schema for test redemption request
+const testRedemptionSchema = z.object({
+  channelId: z.string(),
+  userId: z.string(),
+  username: z.string(),
+  rewardId: z.string(),
+  rewardTitle: z.string().default('Test Reward'),
+  rewardCost: z.number().default(1000)
+});
+
+// Add audit log function
 async function addAuditLog(entry: {
   channelId: string;
   action: string;
@@ -18,7 +29,6 @@ async function addAuditLog(entry: {
       ...entry,
       timestamp: new Date()
     });
-    console.log('Added audit log entry for', entry.action);
   } catch (error) {
     console.error('Error adding audit log entry:', error);
   }
@@ -34,15 +44,16 @@ export async function POST(request: NextRequest) {
 
     // Parse request body
     const body = await request.json();
-    const { channelId, rewardId, userId, username, rewardTitle, rewardCost } = body;
-
-    if (!channelId || !rewardId || !userId || !username) {
+    const result = testRedemptionSchema.safeParse(body);
+    
+    if (!result.success) {
       return NextResponse.json({ 
-        error: 'Missing required parameters',
-        required: ['channelId', 'rewardId', 'userId', 'username'],
-        received: Object.keys(body)
+        error: 'Invalid request body',
+        details: result.error.format()
       }, { status: 400 });
     }
+    
+    const { channelId, userId, username, rewardId, rewardTitle, rewardCost } = result.data;
 
     // Get user to verify ownership
     const user = await getUser(session.user.id);
@@ -69,16 +80,12 @@ export async function POST(request: NextRequest) {
     
     const vipSessionsSnapshot = await vipSessionsRef.get();
     
-    let result;
+    let action: string;
     
     if (!vipSessionsSnapshot.empty) {
       // User already has VIP status, extend it
       const vipSession = vipSessionsSnapshot.docs[0];
-      
-      // Update the expiration date
-      await db.collection('vipSessions').doc(vipSession.id).update({
-        expiresAt: expirationDate
-      });
+      await updateVIPSessionExpiration(vipSession.id, expirationDate);
       
       // Log the extension
       await addAuditLog({
@@ -87,22 +94,18 @@ export async function POST(request: NextRequest) {
         username,
         userId,
         details: {
-          method: 'channel_points_test',
-          rewardTitle: rewardTitle || 'Test Reward',
-          rewardCost: rewardCost || 1000,
+          method: 'test_redemption',
+          rewardTitle,
+          rewardCost,
           hours: vipDuration
         }
       });
       
-      result = {
-        action: 'extended',
-        userId,
-        username,
-        expirationDate: expirationDate.toISOString()
-      };
+      action = 'extended';
+      console.log(`Extended VIP status for ${username} until ${expirationDate}`);
     } else {
-      // Create new VIP session
-      const sessionRef = await db.collection('vipSessions').add({
+      // Grant new VIP status
+      await createVIPSession({
         channelId,
         userId,
         username,
@@ -111,7 +114,7 @@ export async function POST(request: NextRequest) {
         grantedBy: channelId,
         grantedByUsername: user.username || user.displayName || 'System',
         isActive: true,
-        grantMethod: 'channelPoints'
+        grantMethod: 'other'
       });
       
       // Log the grant
@@ -121,28 +124,28 @@ export async function POST(request: NextRequest) {
         username,
         userId,
         details: {
-          method: 'channel_points_test',
-          rewardTitle: rewardTitle || 'Test Reward',
-          rewardCost: rewardCost || 1000,
+          method: 'test_redemption',
+          rewardTitle,
+          rewardCost,
           expirationDate: expirationDate.toISOString()
         }
       });
       
-      result = {
-        action: 'granted',
-        userId,
-        username,
-        sessionId: sessionRef.id,
-        expirationDate: expirationDate.toISOString()
-      };
+      action = 'granted';
+      console.log(`Granted VIP status to ${username} until ${expirationDate}`);
     }
     
     return NextResponse.json({ 
       success: true,
-      result
+      result: {
+        action,
+        username,
+        userId,
+        expirationDate
+      }
     });
   } catch (error) {
-    console.error('Error in test redemption:', error);
+    console.error('Error processing test redemption:', error);
     return NextResponse.json({ 
       error: 'Internal server error',
       message: 'Failed to process test redemption',

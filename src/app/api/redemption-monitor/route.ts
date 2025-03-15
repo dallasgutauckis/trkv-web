@@ -6,7 +6,7 @@ import {
   startRedemptionMonitoring, 
   stopRedemptionMonitoring, 
   getRedemptionMonitorStatus 
-} from '@/services/twitch-eventsub';
+} from '@/services/eventsub-manager';
 import { z } from 'zod';
 import { db } from '@/lib/firebase';
 

@@ -5,6 +5,7 @@ import { toast } from 'react-hot-toast';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDistanceToNow } from 'date-fns';
+import { useEventStream, EventSubEvent } from '@/hooks/use-event-stream';
 
 interface AuditLogEntry {
   id: string;
@@ -28,7 +29,11 @@ export default function AuditLog({ channelId, limit = 50, action }: AuditLogProp
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [indexUrl, setIndexUrl] = useState<string | null>(null);
+  
+  // Connect to the event stream
+  const { events } = useEventStream(channelId);
 
+  // Fetch initial logs
   useEffect(() => {
     async function fetchLogs() {
       if (!session?.user) return;
@@ -69,6 +74,48 @@ export default function AuditLog({ channelId, limit = 50, action }: AuditLogProp
     
     fetchLogs();
   }, [channelId, limit, action, session]);
+
+  // Process real-time events
+  useEffect(() => {
+    // Only process VIP-related events
+    const vipEventTypes = ['VIP_GRANTED', 'VIP_EXTENDED', 'VIP_GRANT_FAILED'];
+    
+    // Find the most recent event that's relevant
+    const recentEvent = events.find(event => 
+      vipEventTypes.includes(event.type) && 
+      event.channelId === channelId
+    );
+    
+    if (recentEvent && recentEvent.data) {
+      // Convert the event to an audit log entry
+      const newEntry: AuditLogEntry = {
+        id: `temp-${Date.now()}`, // Temporary ID until refresh
+        channelId: recentEvent.channelId,
+        action: recentEvent.type,
+        username: recentEvent.data.username,
+        userId: recentEvent.data.userId,
+        timestamp: recentEvent.timestamp.toISOString(),
+        details: recentEvent.data.details
+      };
+      
+      // Add to the logs if it doesn't already exist
+      setLogs(prevLogs => {
+        // Check if we already have this event (by comparing timestamps and usernames)
+        const exists = prevLogs.some(log => 
+          log.action === newEntry.action && 
+          log.username === newEntry.username &&
+          Math.abs(new Date(log.timestamp).getTime() - new Date(newEntry.timestamp).getTime()) < 5000
+        );
+        
+        if (exists) {
+          return prevLogs;
+        }
+        
+        // Add the new entry at the beginning
+        return [newEntry, ...prevLogs];
+      });
+    }
+  }, [events, channelId]);
 
   if (isLoading) {
     return (
