@@ -60,38 +60,46 @@ export async function POST(req: Request) {
     const json = await req.json();
     const body = updateSettingsSchema.parse(json);
 
-    // Get user
-    let user = await getUser(body.channelId);
-    
-    // Create user if not found
-    if (!user) {
-      console.log(`User ${body.channelId} not found, creating new user record`);
-      user = await createUser({
-        twitchId: body.channelId,
-        username: session.user?.name || 'unknown',
-        email: session.user?.email || '',
-        settings: {
-          vipDuration: 12 * 60 * 60 * 1000, // 12 hours
-          autoRemoveEnabled: true,
-          notificationsEnabled: true,
-          ...(body.channelPointRewardId !== undefined && { channelPointRewardId: body.channelPointRewardId }),
-        }
-      });
+    try {
+      // Get user
+      let user = await getUser(body.channelId);
+      
+      // Create user if not found
+      if (!user) {
+        console.log(`User ${body.channelId} not found, creating new user record`);
+        user = await createUser({
+          twitchId: body.channelId,
+          username: session.user?.name || 'unknown',
+          email: session.user?.email || '',
+          settings: {
+            vipDuration: 12 * 60 * 60 * 1000, // 12 hours
+            autoRemoveEnabled: true,
+            notificationsEnabled: true,
+            ...(body.channelPointRewardId !== undefined && { channelPointRewardId: body.channelPointRewardId }),
+          }
+        });
+      }
+
+      // Update settings
+      const updatedSettings = {
+        ...user.settings,
+        ...(body.channelPointRewardId !== undefined && { channelPointRewardId: body.channelPointRewardId }),
+        ...(body.vipDuration !== undefined && { vipDuration: body.vipDuration }),
+        ...(body.autoRemoveEnabled !== undefined && { autoRemoveEnabled: body.autoRemoveEnabled }),
+        ...(body.notificationsEnabled !== undefined && { notificationsEnabled: body.notificationsEnabled }),
+      };
+
+      await updateUserSettings(body.channelId, updatedSettings);
+      console.log(`Updated settings for user ${body.channelId}:`, updatedSettings);
+
+      return NextResponse.json({ success: true });
+    } catch (dbError: any) {
+      console.error('Database error in settings POST:', dbError);
+      return NextResponse.json(
+        { error: 'Database error', message: dbError.message || 'Unknown database error' },
+        { status: 500 }
+      );
     }
-
-    // Update settings
-    const updatedSettings = {
-      ...user.settings,
-      ...(body.channelPointRewardId !== undefined && { channelPointRewardId: body.channelPointRewardId }),
-      ...(body.vipDuration !== undefined && { vipDuration: body.vipDuration }),
-      ...(body.autoRemoveEnabled !== undefined && { autoRemoveEnabled: body.autoRemoveEnabled }),
-      ...(body.notificationsEnabled !== undefined && { notificationsEnabled: body.notificationsEnabled }),
-    };
-
-    await updateUserSettings(body.channelId, updatedSettings);
-    console.log(`Updated settings for user ${body.channelId}:`, updatedSettings);
-
-    return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error in settings POST:', error);
     return NextResponse.json(
