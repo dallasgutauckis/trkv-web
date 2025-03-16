@@ -7,7 +7,7 @@
     "sync": "node sync-github-secrets.js"
   },
   "dependencies": {
-    "@octokit/rest": "^19.0.7",
+    "@octokit/rest": "^19.0.13",
     "chalk": "^4.1.2",
     "dotenv": "^16.3.1",
     "libsodium-wrappers": "^0.7.11",
@@ -16,4 +16,4 @@
   "engines": {
     "node": ">=14"
   }
-} 
+}

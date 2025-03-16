@@ -19,7 +19,7 @@ const path = require('path');
 const { execSync } = require('child_process');
 const { Octokit } = require('@octokit/rest');
 const dotenv = require('dotenv');
-const sodium = require('tweetsodium');
+const sodium = require('libsodium-wrappers');
 const chalk = require('chalk');
 const prompts = require('prompts');
 const readline = require('readline');
@@ -163,12 +163,12 @@ async function main() {
     // Check if environment exists, create 'production' if it doesn't
     let envExists = false;
     try {
-      const { data: environments } = await octokit.repos.getAllEnvironments({
+      const { data } = await octokit.request('GET /repos/{owner}/{repo}/environments', {
         owner: repoInfo.owner,
         repo: repoInfo.repo
       });
       
-      envExists = environments.environments.some(env => env.name === 'production');
+      envExists = data.environments.some(env => env.name === 'production');
     } catch (error) {
       console.log(chalk.yellow('Could not fetch environments, will attempt to create if needed.'));
     }
@@ -176,7 +176,7 @@ async function main() {
     if (!envExists) {
       try {
         console.log(chalk.yellow('Creating "production" environment...'));
-        await octokit.repos.createOrUpdateEnvironment({
+        await octokit.request('PUT /repos/{owner}/{repo}/environments/{environment_name}', {
           owner: repoInfo.owner,
           repo: repoInfo.repo,
           environment_name: 'production'
@@ -237,6 +237,7 @@ async function main() {
 
 // Helper function to encrypt a secret using sodium
 async function encryptSecret(secret, publicKey) {
+  // Ensure sodium is ready
   await sodium.ready;
   
   // Convert the public key to a Uint8Array
@@ -246,7 +247,7 @@ async function encryptSecret(secret, publicKey) {
   const messageBytes = Buffer.from(secret);
   
   // Encrypt using libsodium
-  const encryptedBytes = sodium.seal(messageBytes, keyBytes);
+  const encryptedBytes = sodium.crypto_box_seal(messageBytes, keyBytes);
   
   // Return as base64 string
   return Buffer.from(encryptedBytes).toString('base64');
@@ -260,8 +261,8 @@ async function setSecret(octokit, repoInfo, secretName, secretValue, publicKey, 
     // Encrypt the secret
     const encryptedValue = await encryptSecret(secretValue, publicKey);
     
-    // Set the secret
-    await octokit.actions.createOrUpdateRepoSecret({
+    // Set the secret using the request method directly
+    await octokit.request('PUT /repos/{owner}/{repo}/actions/secrets/{secret_name}', {
       owner: repoInfo.owner,
       repo: repoInfo.repo,
       secret_name: secretName,
@@ -282,8 +283,9 @@ async function setEnvironmentVariable(octokit, repoInfo, varName, varValue) {
   console.log(`  Setting environment variable ${chalk.yellow(varName)}...`);
   
   try {
-    // Set the environment variable
-    await octokit.repos.createOrUpdateEnvironmentVariable({
+    // Use the request method directly instead of the high-level API call
+    // that might not be properly implemented in the current Octokit version
+    await octokit.request('PUT /repos/{owner}/{repo}/environments/{environment_name}/variables/{name}', {
       owner: repoInfo.owner,
       repo: repoInfo.repo,
       environment_name: 'production',
