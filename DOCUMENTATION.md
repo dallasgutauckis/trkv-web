@@ -30,6 +30,7 @@ The Twitch VIP Manager Bot is a web application that allows Twitch streamers to 
 - **EventSub Integration**: Use Twitch's EventSub to receive real-time notifications of reward redemptions.
 - **Redemption Monitoring**: Dedicated service to monitor and process channel point redemptions in real-time.
 - **Multiple Notification Methods**: Support for both webhook-based EventSub and WebSocket-based EventSub.
+- **Standalone EventSub Service**: A separate Python-based service that monitors EventSub events and provides high reliability.
 
 ### 4. Dashboard
 
@@ -68,6 +69,15 @@ The Twitch VIP Manager Bot is a web application that allows Twitch streamers to 
 - **Redemption Monitor Service**: Background service that listens for channel point redemptions and processes them.
 - **Cron Jobs**: Scheduled tasks for maintenance operations like removing expired VIPs.
 
+### Standalone EventSub Service
+
+- **Python-based Service**: Separate service built with Python's asyncio framework.
+- **WebSocket Connection**: Direct connection to Twitch's EventSub WebSocket API.
+- **Auto-recovery**: Automatic reconnection with exponential backoff.
+- **Channel Notifications**: Sends chat messages when the service comes online and when VIP status is granted.
+- **Containerized Deployment**: Runs in a Docker container on Google Cloud Run.
+- **High Reliability**: Designed to never crash and automatically recover from errors.
+
 ### Data Models
 
 #### User
@@ -103,6 +113,7 @@ The Twitch VIP Manager Bot is a web application that allows Twitch streamers to 
 - **Cloud Build**: CI/CD pipeline for automated deployments.
 - **Artifact Registry**: Storage for Docker images.
 - **Cloud Scheduler**: Triggers cron jobs for scheduled tasks.
+- **Multi-service Architecture**: Main web application and standalone EventSub service.
 
 ## Security Features
 
@@ -121,6 +132,7 @@ The Twitch VIP Manager Bot is a web application that allows Twitch streamers to 
 - **Error Reporting**: Capture and report errors for quick resolution.
 - **Service Recovery**: Ability to refresh and restart monitoring services after server restarts.
 - **EventSub Status Monitoring**: Track the status of EventSub subscriptions.
+- **Cloud Logging Integration**: Structured logging to Google Cloud Logging.
 
 ## User Flows
 
@@ -132,11 +144,12 @@ The Twitch VIP Manager Bot is a web application that allows Twitch streamers to 
 
 ### Viewer VIP Redemption
 1. Viewer redeems channel points for VIP
-2. System receives notification via EventSub WebSocket or webhook
-3. Redemption Monitor processes the redemption
+2. EventSub service receives notification via WebSocket
+3. Service processes the redemption and calls the main application API
 4. VIP status is granted for the configured duration
-5. Streamer sees the new VIP in their dashboard
-6. VIP status is automatically removed when it expires
+5. Service sends a chat message to the channel
+6. Streamer sees the new VIP in their dashboard
+7. VIP status is automatically removed when it expires
 
 ### Settings Management
 1. Streamer accesses the settings page
@@ -194,6 +207,13 @@ The Twitch VIP Manager Bot is a web application that allows Twitch streamers to 
 - Runs scheduled tasks at regular intervals
 - Removes expired VIPs automatically
 - Updates database records and notifies clients of changes
+
+### Standalone EventSub Service
+- Connects directly to Twitch's EventSub WebSocket API
+- Monitors channel point redemptions in real-time
+- Sends chat notifications to channels
+- Automatically recovers from errors and reconnects
+- Runs as a separate service in Google Cloud Run
 
 ## Future Enhancements
 
