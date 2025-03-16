@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * GitHub Secrets Sync Tool
+ * GitHub Secrets and Variables Sync Tool
  * 
- * This script syncs environment variables from a .env file to GitHub repository secrets.
- * It uses the GitHub REST API with a personal access token for authentication.
+ * This script syncs environment variables from a .env file to GitHub repository 
+ * secrets and environment variables.
  * 
  * Requirements:
  * - Node.js 14+
@@ -22,20 +22,27 @@ const prompts = require('prompts');
 
 // Configuration
 const ENV_FILE = '.env';
-const MAPPING = [
-  { envVar: 'PROJECT_ID', secret: 'GCP_PROJECT_ID' },
-  { envVar: 'TWITCH_CLIENT_ID', secret: 'TWITCH_CLIENT_ID' },
-  { envVar: 'TWITCH_CLIENT_SECRET', secret: 'TWITCH_CLIENT_SECRET' },
-  { envVar: 'NEXTAUTH_SECRET', secret: 'NEXTAUTH_SECRET' },
-  { envVar: 'NEXTAUTH_URL', secret: 'NEXTAUTH_URL' },
-  { envVar: 'API_BASE_URL', secret: 'API_BASE_URL' },
-  { envVar: 'SERVICE_ACCOUNT', secret: 'SERVICE_ACCOUNT' },
-  { envVar: 'WORKLOAD_IDENTITY_PROVIDER', secret: 'WORKLOAD_IDENTITY_PROVIDER' }
+
+// Variables to be set as secrets (sensitive information)
+const SECRETS = [
+  'TWITCH_CLIENT_ID',
+  'TWITCH_CLIENT_SECRET',
+  'NEXTAUTH_SECRET',
+  'SERVICE_ACCOUNT',
+  'WORKLOAD_IDENTITY_PROVIDER'
+];
+
+// Variables to be set as environment variables (non-sensitive information)
+const ENV_VARS = [
+  'PROJECT_ID',
+  'NEXTAUTH_URL',
+  'API_BASE_URL',
+  'REGION'
 ];
 
 // Print header
 console.log(chalk.blue('=========================================================='));
-console.log(chalk.blue('GitHub Secret Sync Tool (Node.js Version)'));
+console.log(chalk.blue('GitHub Secrets & Variables Sync Tool'));
 console.log(chalk.blue('=========================================================='));
 
 // Main function
@@ -85,36 +92,94 @@ async function main() {
 
     // Track missing variables
     const missingSecrets = [];
+    const missingEnvVars = [];
 
-    // Process each mapping
-    for (const map of MAPPING) {
-      const value = envConfig[map.envVar];
+    // Process secrets
+    console.log(chalk.blue('Setting repository secrets:'));
+    for (const secretName of SECRETS) {
+      const value = envConfig[secretName];
       
       if (!value) {
-        console.log(chalk.red(`✗ Missing value for ${map.envVar}`));
-        missingSecrets.push(map.envVar);
+        console.log(chalk.red(`✗ Missing value for ${secretName}`));
+        missingSecrets.push(secretName);
         continue;
       }
       
       // Set the secret
-      await setSecret(octokit, repoInfo, map.secret, value, publicKey, publicKeyId);
+      await setSecret(octokit, repoInfo, secretName, value, publicKey, publicKeyId);
+    }
+
+    // Process environment variables
+    console.log(chalk.blue('\nSetting repository environment variables:'));
+    
+    // Check if environment exists, create 'production' if it doesn't
+    let envExists = false;
+    try {
+      const { data: environments } = await octokit.repos.getAllEnvironments({
+        owner: repoInfo.owner,
+        repo: repoInfo.repo
+      });
+      
+      envExists = environments.environments.some(env => env.name === 'production');
+    } catch (error) {
+      console.log(chalk.yellow('Could not fetch environments, will attempt to create if needed.'));
+    }
+    
+    if (!envExists) {
+      try {
+        console.log(chalk.yellow('Creating "production" environment...'));
+        await octokit.repos.createOrUpdateEnvironment({
+          owner: repoInfo.owner,
+          repo: repoInfo.repo,
+          environment_name: 'production'
+        });
+      } catch (error) {
+        console.error(chalk.red(`✗ Failed to create environment: ${error.message}`));
+        console.log(chalk.yellow('Will attempt to set variables anyway.'));
+      }
+    }
+    
+    // Set environment variables
+    for (const varName of ENV_VARS) {
+      const value = envConfig[varName];
+      
+      if (!value) {
+        console.log(chalk.red(`✗ Missing value for ${varName}`));
+        missingEnvVars.push(varName);
+        continue;
+      }
+      
+      // Set the environment variable
+      await setEnvironmentVariable(octokit, repoInfo, varName, value);
     }
 
     // Print summary
     console.log(chalk.blue('=========================================================='));
     
-    if (missingSecrets.length === 0) {
-      console.log(chalk.green('✓ All secrets synced successfully!'));
+    if (missingSecrets.length === 0 && missingEnvVars.length === 0) {
+      console.log(chalk.green('✓ All variables synced successfully!'));
     } else {
       console.log(chalk.yellow('⚠ The following variables were missing:'));
-      missingSecrets.forEach(secret => {
-        console.log(`  - ${secret}`);
-      });
+      
+      if (missingSecrets.length > 0) {
+        console.log(chalk.yellow('  Secrets:'));
+        missingSecrets.forEach(secret => {
+          console.log(`    - ${secret}`);
+        });
+      }
+      
+      if (missingEnvVars.length > 0) {
+        console.log(chalk.yellow('  Environment Variables:'));
+        missingEnvVars.forEach(envVar => {
+          console.log(`    - ${envVar}`);
+        });
+      }
+      
       console.log(chalk.yellow(`Please add them to your ${ENV_FILE} file and run this script again.`));
     }
     
     console.log(chalk.blue('=========================================================='));
-    console.log(chalk.green('GitHub Actions workflow is now configured with your secrets!'));
+    console.log(chalk.green('GitHub Actions workflow is now configured with your variables!'));
     
   } catch (error) {
     console.error(chalk.red('Error:'), error.message);
@@ -160,6 +225,28 @@ async function setSecret(octokit, repoInfo, secretName, secretValue, publicKey, 
     return true;
   } catch (error) {
     console.error(`  ${chalk.red('✗ Failed to set ' + secretName)}: ${error.message}`);
+    return false;
+  }
+}
+
+// Helper function to set a GitHub environment variable
+async function setEnvironmentVariable(octokit, repoInfo, varName, varValue) {
+  console.log(`  Setting environment variable ${chalk.yellow(varName)}...`);
+  
+  try {
+    // Set the environment variable
+    await octokit.repos.createOrUpdateEnvironmentVariable({
+      owner: repoInfo.owner,
+      repo: repoInfo.repo,
+      environment_name: 'production',
+      name: varName,
+      value: varValue
+    });
+    
+    console.log(`  ${chalk.green('✓ Successfully set ' + varName)}`);
+    return true;
+  } catch (error) {
+    console.error(`  ${chalk.red('✗ Failed to set ' + varName)}: ${error.message}`);
     return false;
   }
 }

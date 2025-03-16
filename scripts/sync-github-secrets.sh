@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Script to sync secrets from .env file to GitHub repository secrets
+# Script to sync secrets and environment variables from .env file to GitHub repository
 # Requires GitHub CLI (gh) to be installed and authenticated
 
 set -e
@@ -14,24 +14,22 @@ NC='\033[0m' # No Color
 
 # Configuration
 ENV_FILE=".env"
-REQUIRED_SECRETS=(
-  "GCP_PROJECT_ID"
+
+# Variables to be set as secrets (sensitive information)
+SECRETS=(
   "TWITCH_CLIENT_ID"
   "TWITCH_CLIENT_SECRET"
   "NEXTAUTH_SECRET"
-  "NEXTAUTH_URL"
-  "API_BASE_URL"
+  "SERVICE_ACCOUNT"
+  "WORKLOAD_IDENTITY_PROVIDER"
 )
 
-# Mapping of .env variables to GitHub secrets
-# Format: "ENV_VAR_NAME:GITHUB_SECRET_NAME"
-MAPPING=(
-  "PROJECT_ID:GCP_PROJECT_ID"
-  "TWITCH_CLIENT_ID:TWITCH_CLIENT_ID"
-  "TWITCH_CLIENT_SECRET:TWITCH_CLIENT_SECRET"
-  "NEXTAUTH_SECRET:NEXTAUTH_SECRET"
-  "NEXTAUTH_URL:NEXTAUTH_URL"
-  "API_BASE_URL:API_BASE_URL"
+# Variables to be set as environment variables (non-sensitive information)
+ENV_VARS=(
+  "PROJECT_ID"
+  "NEXTAUTH_URL"
+  "API_BASE_URL"
+  "REGION"
 )
 
 # Check if .env file exists
@@ -76,7 +74,7 @@ OWNER=$(echo $REPO_PATH | cut -d '/' -f 1)
 REPO=$(echo $REPO_PATH | cut -d '/' -f 2)
 
 echo -e "${BLUE}===========================================================${NC}"
-echo -e "${BLUE}GitHub Secret Sync Tool${NC}"
+echo -e "${BLUE}GitHub Secrets & Variables Sync Tool${NC}"
 echo -e "${BLUE}===========================================================${NC}"
 echo -e "Repository: ${YELLOW}$OWNER/$REPO${NC}"
 echo -e "Environment File: ${YELLOW}$ENV_FILE${NC}"
@@ -84,91 +82,126 @@ echo -e "${BLUE}-----------------------------------------------------------${NC}
 
 # Function to set a secret
 set_secret() {
-  local env_var=$1
-  local secret_name=$2
-  local value=$3
+  local var_name=$1
+  local value=$2
   
   if [ -z "$value" ]; then
-    echo -e "  ${YELLOW}⚠ Skipping $secret_name (empty value)${NC}"
-    return
+    echo -e "  ${YELLOW}⚠ Skipping $var_name (empty value)${NC}"
+    return 1
   fi
   
-  echo -e "  Setting secret ${YELLOW}$secret_name${NC}..."
+  echo -e "  Setting secret ${YELLOW}$var_name${NC}..."
   
   # Use GitHub CLI to set the secret
-  if echo "$value" | gh secret set "$secret_name" --repo "$OWNER/$REPO" > /dev/null 2>&1; then
-    echo -e "  ${GREEN}✓ Successfully set $secret_name${NC}"
+  if echo "$value" | gh secret set "$var_name" --repo "$OWNER/$REPO" > /dev/null 2>&1; then
+    echo -e "  ${GREEN}✓ Successfully set $var_name${NC}"
+    return 0
   else
-    echo -e "  ${RED}✗ Failed to set $secret_name${NC}"
-    exit 1
+    echo -e "  ${RED}✗ Failed to set $var_name${NC}"
+    return 1
+  fi
+}
+
+# Function to set an environment variable
+set_env_var() {
+  local var_name=$1
+  local value=$2
+  local env_name="production"
+  
+  if [ -z "$value" ]; then
+    echo -e "  ${YELLOW}⚠ Skipping $var_name (empty value)${NC}"
+    return 1
+  fi
+  
+  echo -e "  Setting environment variable ${YELLOW}$var_name${NC}..."
+  
+  # First check if the environment exists
+  if ! gh api "repos/$OWNER/$REPO/environments/$env_name" &> /dev/null; then
+    echo -e "  ${YELLOW}Creating environment $env_name...${NC}"
+    # Create the environment
+    if ! gh api "repos/$OWNER/$REPO/environments/$env_name" -X PUT &> /dev/null; then
+      echo -e "  ${RED}✗ Failed to create environment $env_name${NC}"
+      echo -e "  ${YELLOW}Will attempt to set variable anyway${NC}"
+    fi
+  fi
+  
+  # Use GitHub CLI to set the environment variable
+  if gh variable set "$var_name" --body "$value" --env "$env_name" --repo "$OWNER/$REPO" > /dev/null 2>&1; then
+    echo -e "  ${GREEN}✓ Successfully set $var_name${NC}"
+    return 0
+  else
+    echo -e "  ${RED}✗ Failed to set $var_name${NC}"
+    return 1
   fi
 }
 
 # Load variables from .env file without executing it
 echo -e "${BLUE}Loading variables from $ENV_FILE...${NC}"
-ENV_VARS=$(grep -v '^\s*#' $ENV_FILE | grep -v '^\s*$' | sed -E 's/export\s+//')
+ENV_VARS_CONTENT=$(grep -v '^\s*#' $ENV_FILE | grep -v '^\s*$' | sed -E 's/export\s+//')
 
-# Track missing required secrets
+# Track missing required variables
 MISSING_SECRETS=()
+MISSING_ENV_VARS=()
 
-# Process each mapping
-for map in "${MAPPING[@]}"; do
-  ENV_VAR=$(echo $map | cut -d ':' -f 1)
-  SECRET_NAME=$(echo $map | cut -d ':' -f 2)
-  
+# Process secrets
+echo -e "${BLUE}Setting repository secrets:${NC}"
+for secret_name in "${SECRETS[@]}"; do
   # Extract value from loaded variables
-  VALUE=$(echo "$ENV_VARS" | grep "^$ENV_VAR=" | cut -d '=' -f 2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
+  VALUE=$(echo "$ENV_VARS_CONTENT" | grep "^$secret_name=" | cut -d '=' -f 2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
   
   # Check if value exists
   if [ -z "$VALUE" ]; then
-    echo -e "  ${RED}✗ Missing value for $ENV_VAR${NC}"
-    MISSING_SECRETS+=("$ENV_VAR")
+    echo -e "  ${RED}✗ Missing value for $secret_name${NC}"
+    MISSING_SECRETS+=("$secret_name")
   else
     # Set the secret
-    set_secret "$ENV_VAR" "$SECRET_NAME" "$VALUE"
+    set_secret "$secret_name" "$VALUE" || true
   fi
 done
 
-# Check for required Service Account and Workload Identity Provider
-echo -e "${BLUE}-----------------------------------------------------------${NC}"
-echo -e "Checking for Service Account and Workload Identity Provider...${NC}"
-
-# Service Account
-SERVICE_ACCOUNT=$(echo "$ENV_VARS" | grep "^SERVICE_ACCOUNT=" | cut -d '=' -f 2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
-if [ -z "$SERVICE_ACCOUNT" ]; then
-  echo -e "  ${YELLOW}⚠ SERVICE_ACCOUNT not found in $ENV_FILE${NC}"
-  echo -e "  ${YELLOW}You'll need to set this manually:${NC}"
-  echo -e "  ${YELLOW}gh secret set SERVICE_ACCOUNT --repo $OWNER/$REPO${NC}"
-  MISSING_SECRETS+=("SERVICE_ACCOUNT")
-else
-  set_secret "SERVICE_ACCOUNT" "SERVICE_ACCOUNT" "$SERVICE_ACCOUNT"
-fi
-
-# Workload Identity Provider
-WORKLOAD_IDENTITY_PROVIDER=$(echo "$ENV_VARS" | grep "^WORKLOAD_IDENTITY_PROVIDER=" | cut -d '=' -f 2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
-if [ -z "$WORKLOAD_IDENTITY_PROVIDER" ]; then
-  echo -e "  ${YELLOW}⚠ WORKLOAD_IDENTITY_PROVIDER not found in $ENV_FILE${NC}"
-  echo -e "  ${YELLOW}You'll need to set this manually:${NC}"
-  echo -e "  ${YELLOW}gh secret set WORKLOAD_IDENTITY_PROVIDER --repo $OWNER/$REPO${NC}"
-  MISSING_SECRETS+=("WORKLOAD_IDENTITY_PROVIDER")
-else
-  set_secret "WORKLOAD_IDENTITY_PROVIDER" "WORKLOAD_IDENTITY_PROVIDER" "$WORKLOAD_IDENTITY_PROVIDER"
-fi
+# Process environment variables
+echo -e "\n${BLUE}Setting repository environment variables:${NC}"
+for var_name in "${ENV_VARS[@]}"; do
+  # Extract value from loaded variables
+  VALUE=$(echo "$ENV_VARS_CONTENT" | grep "^$var_name=" | cut -d '=' -f 2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
+  
+  # Check if value exists
+  if [ -z "$VALUE" ]; then
+    echo -e "  ${RED}✗ Missing value for $var_name${NC}"
+    MISSING_ENV_VARS+=("$var_name")
+  else
+    # Set the environment variable
+    set_env_var "$var_name" "$VALUE" || true
+  fi
+done
 
 echo -e "${BLUE}===========================================================${NC}"
 
 # Summary
-if [ ${#MISSING_SECRETS[@]} -eq 0 ]; then
-  echo -e "${GREEN}✓ All secrets synced successfully!${NC}"
+if [ ${#MISSING_SECRETS[@]} -eq 0 ] && [ ${#MISSING_ENV_VARS[@]} -eq 0 ]; then
+  echo -e "${GREEN}✓ All variables synced successfully!${NC}"
 else
   echo -e "${YELLOW}⚠ The following variables were missing:${NC}"
-  for secret in "${MISSING_SECRETS[@]}"; do
-    echo -e "  - $secret"
-  done
+  
+  if [ ${#MISSING_SECRETS[@]} -gt 0 ]; then
+    echo -e "${YELLOW}  Secrets:${NC}"
+    for secret in "${MISSING_SECRETS[@]}"; do
+      echo -e "    - $secret"
+    done
+  fi
+  
+  if [ ${#MISSING_ENV_VARS[@]} -gt 0 ]; then
+    echo -e "${YELLOW}  Environment Variables:${NC}"
+    for var in "${MISSING_ENV_VARS[@]}"; do
+      echo -e "    - $var"
+    done
+  fi
+  
   echo -e "${YELLOW}Please add them to your $ENV_FILE file and run this script again,${NC}"
   echo -e "${YELLOW}or set them manually using the GitHub CLI:${NC}"
-  echo -e "${YELLOW}gh secret set SECRET_NAME --repo $OWNER/$REPO${NC}"
+  echo -e "${YELLOW}  For secrets: gh secret set SECRET_NAME --repo $OWNER/$REPO${NC}"
+  echo -e "${YELLOW}  For variables: gh variable set VAR_NAME --env production --repo $OWNER/$REPO${NC}"
 fi
 
 echo -e "${BLUE}===========================================================${NC}"
-echo -e "${GREEN}GitHub Actions workflow is now configured with your secrets!${NC}" 
+echo -e "${GREEN}GitHub Actions workflow is now configured with your variables!${NC}" 
