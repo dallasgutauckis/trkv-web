@@ -29,9 +29,13 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
       
+      - name: Install gcloud beta components
+        run: |-
+          gcloud components install beta --quiet
+      
       - name: Submit Cloud Build job
         run: |-
-          gcloud beta builds submit --config=cloudbuild.yaml \
+          gcloud beta builds submit --quiet --config=cloudbuild.yaml \
             --substitutions=_TWITCH_CLIENT_ID=${{ secrets.TWITCH_CLIENT_ID }},_TWITCH_CLIENT_SECRET=${{ secrets.TWITCH_CLIENT_SECRET }},_NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }},_NEXTAUTH_URL=${{ secrets.NEXTAUTH_URL }},_API_BASE_URL=${{ secrets.API_BASE_URL }} \
             --project=${{ secrets.GCP_PROJECT_ID }}
       
