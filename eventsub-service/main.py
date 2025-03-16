@@ -15,6 +15,7 @@ import logging
 import asyncio
 import signal
 import sys
+import threading
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Set
 
@@ -25,6 +26,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from dotenv import load_dotenv
 from google.cloud import firestore
 from google.cloud import logging as gcp_logging
+from flask import Flask, jsonify
 
 # Load environment variables
 load_dotenv()
@@ -48,14 +50,30 @@ SESSION_ID = str(uuid.uuid4())
 TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
 TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
 PROJECT_ID = os.getenv("PROJECT_ID")
-API_BASE_URL = os.getenv("API_BASE_URL")
+PORT = int(os.getenv("PORT", "8080"))
 
-# Global state
-active_connections = {}
-monitored_channels = set()
-app_access_token = None
-token_expiry = 0
-db = None
+# Create Flask app for health checks
+app = Flask(__name__)
+
+# Global service state
+service_status = {
+    "status": "initializing",
+    "uptime": 0,
+    "start_time": time.time(),
+    "connected_channels": 0,
+    "session_id": SESSION_ID
+}
+
+@app.route('/')
+def home():
+    """Health check endpoint."""
+    service_status["uptime"] = int(time.time() - service_status["start_time"])
+    return jsonify(service_status)
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint."""
+    return jsonify({"status": "ok"})
 
 class EventSubService:
     def __init__(self):
@@ -393,7 +411,7 @@ class EventSubService:
             }
             
             async with self.session.post(
-                f"{API_BASE_URL}/api/vip",
+                f"{TWITCH_API_BASE}/api/vip",
                 headers=headers,
                 json=data
             ) as response:
@@ -612,25 +630,43 @@ async def main():
     
     try:
         await service.initialize()
+        service_status["status"] = "running"
         
         # Keep the service running
         while service.keep_running:
+            service_status["connected_channels"] = len(service.channels_to_monitor)
             await asyncio.sleep(1)
     except Exception as e:
         logger.error(f"Service error: {str(e)}")
+        service_status["status"] = "error"
     finally:
+        service_status["status"] = "shutting_down"
         await service.shutdown()
 
 async def shutdown(service):
     """Shutdown the service gracefully."""
     logger.info("Received shutdown signal")
+    service_status["status"] = "shutting_down"
     await service.shutdown()
 
+def run_flask():
+    """Run the Flask app in a separate thread."""
+    app.run(host='0.0.0.0', port=PORT)
+
 if __name__ == "__main__":
+    # Start Flask in a separate thread
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+    
+    logger.info(f"Web server started on port {PORT}")
+    
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Service stopped by user")
+        service_status["status"] = "stopped"
     except Exception as e:
         logger.error(f"Unhandled exception: {str(e)}")
+        service_status["status"] = "crashed"
         sys.exit(1) 
