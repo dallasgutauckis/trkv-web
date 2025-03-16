@@ -16,5 +16,5 @@ ENV PORT=8080
 # Expose the port
 EXPOSE 8080
 
-# Run the service
-CMD ["python", "main.py"] 
+# Run the service with hypercorn
+CMD ["hypercorn", "--bind", "0.0.0.0:8080", "--workers", "1", "asgi:app"] 

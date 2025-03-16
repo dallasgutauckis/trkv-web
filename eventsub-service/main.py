@@ -64,6 +64,9 @@ service_status = {
     "session_id": SESSION_ID
 }
 
+# Global service instance
+service_instance = None
+
 @app.route('/')
 def home():
     """Health check endpoint."""
@@ -618,30 +621,29 @@ class EventSubService:
         
         logger.info("EventSub service shutdown complete")
 
-async def main():
-    """Main entry point for the service."""
-    service = EventSubService()
+async def initialize_service():
+    """Initialize the EventSub service."""
+    global service_instance
     
-    # Set up signal handlers
-    loop = asyncio.get_running_loop()
-    
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown(service)))
-    
-    try:
-        await service.initialize()
-        service_status["status"] = "running"
+    if service_instance is None:
+        logger.info("Initializing EventSub service")
+        service_instance = EventSubService()
+
+        # Set up graceful shutdown
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown(service_instance)))
         
-        # Keep the service running
-        while service.keep_running:
-            service_status["connected_channels"] = len(service.channels_to_monitor)
-            await asyncio.sleep(1)
-    except Exception as e:
-        logger.error(f"Service error: {str(e)}")
-        service_status["status"] = "error"
-    finally:
-        service_status["status"] = "shutting_down"
-        await service.shutdown()
+        try:
+            await service_instance.initialize()
+            service_status["status"] = "running"
+            logger.info("EventSub service initialized and running")
+        except Exception as e:
+            logger.error(f"Service initialization error: {str(e)}")
+            service_status["status"] = "error"
+    
+    # Return the service instance
+    return service_instance
 
 async def shutdown(service):
     """Shutdown the service gracefully."""
@@ -649,24 +651,60 @@ async def shutdown(service):
     service_status["status"] = "shutting_down"
     await service.shutdown()
 
-def run_flask():
-    """Run the Flask app in a separate thread."""
-    app.run(host='0.0.0.0', port=PORT)
-
-if __name__ == "__main__":
-    # Start Flask in a separate thread
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-    
-    logger.info(f"Web server started on port {PORT}")
+async def background_task():
+    """
+    Background task to manage the EventSub service.
+    This runs alongside the Flask app in the event loop.
+    """
+    service = await initialize_service()
     
     try:
-        asyncio.run(main())
+        # Keep the service running
+        while service.keep_running:
+            service_status["connected_channels"] = len(service.channels_to_monitor)
+            await asyncio.sleep(1)
+    except Exception as e:
+        logger.error(f"Background task error: {str(e)}")
+        service_status["status"] = "error"
+    finally:
+        service_status["status"] = "shutting_down"
+        await service.shutdown()
+
+# Start background task when app is running directly
+if __name__ == "__main__":
+    # Create event loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    # Start background task
+    background_task_future = loop.create_task(background_task())
+    
+    logger.info(f"Starting web server on port {PORT}")
+    
+    try:
+        # Run Flask in the event loop too
+        from hypercorn.asyncio import serve
+        from hypercorn.config import Config
+        
+        config = Config()
+        config.bind = [f"0.0.0.0:{PORT}"]
+        config.use_reloader = False
+        
+        loop.run_until_complete(serve(app, config))
     except KeyboardInterrupt:
         logger.info("Service stopped by user")
         service_status["status"] = "stopped"
     except Exception as e:
-        logger.error(f"Unhandled exception: {str(e)}")
+        logger.error(f"Web server error: {str(e)}")
         service_status["status"] = "crashed"
+    finally:
+        # Cancel background task
+        background_task_future.cancel()
+        try:
+            loop.run_until_complete(background_task_future)
+        except asyncio.CancelledError:
+            pass
+        
+        # Close the event loop
+        loop.close()
         sys.exit(1) 
