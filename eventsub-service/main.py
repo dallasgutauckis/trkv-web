@@ -57,6 +57,13 @@ TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
 TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
 PROJECT_ID = os.getenv("PROJECT_ID")
 PORT = int(os.getenv("PORT", "8080"))
+API_BASE_URL = os.getenv("API_BASE_URL")
+NEXTAUTH_URL = os.getenv("NEXTAUTH_URL")
+
+# Use NEXTAUTH_URL as the base URL if available
+BASE_URL = NEXTAUTH_URL or API_BASE_URL or "http://localhost:3000"
+
+logger.info(f"Using BASE_URL: {BASE_URL}")
 
 # Global service state
 service_status = {
@@ -407,7 +414,7 @@ class EventSubService:
             }
             
             async with self.session.post(
-                f"{TWITCH_API_BASE}/api/vip",
+                f"{BASE_URL}/api/vip",
                 headers=headers,
                 json=data
             ) as response:
