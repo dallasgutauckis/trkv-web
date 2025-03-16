@@ -71,23 +71,6 @@ if (showHelp) {
   process.exit(0);
 }
 
-// Variables to be set as secrets (sensitive information)
-const SECRETS = [
-  'TWITCH_CLIENT_ID',
-  'TWITCH_CLIENT_SECRET',
-  'NEXTAUTH_SECRET',
-  'SERVICE_ACCOUNT',
-  'WORKLOAD_IDENTITY_PROVIDER'
-];
-
-// Variables to be set as environment variables (non-sensitive information)
-const ENV_VARS = [
-  'PROJECT_ID',
-  'NEXTAUTH_URL',
-  'API_BASE_URL',
-  'REGION'
-];
-
 // Print header
 console.log(chalk.blue('=========================================================='));
 console.log(chalk.blue('GitHub Secrets & Variables Sync Tool'));
@@ -138,92 +121,40 @@ async function main() {
     const publicKey = publicKeyResponse.data.key;
     const publicKeyId = publicKeyResponse.data.key_id;
 
-    // Track missing variables
-    const missingSecrets = [];
-    const missingEnvVars = [];
-
-    // Process secrets
+    // Process all variables as secrets
     console.log(chalk.blue('Setting repository secrets:'));
-    for (const secretName of SECRETS) {
-      const value = envConfig[secretName];
-      
-      if (!value) {
-        console.log(chalk.red(`✗ Missing value for ${secretName}`));
-        missingSecrets.push(secretName);
-        continue;
-      }
-      
-      // Set the secret
-      await setSecret(octokit, repoInfo, secretName, value, publicKey, publicKeyId);
-    }
-
-    // Process environment variables
-    console.log(chalk.blue('\nSetting repository environment variables:'));
     
-    // Check if environment exists, create 'production' if it doesn't
-    let envExists = false;
-    try {
-      const { data } = await octokit.request('GET /repos/{owner}/{repo}/environments', {
-        owner: repoInfo.owner,
-        repo: repoInfo.repo
-      });
+    const allVariables = Object.keys(envConfig);
+    const failedVariables = [];
+    
+    // Skip GITHUB_TOKEN to avoid recursion issues
+    for (const varName of allVariables) {
+      if (varName === 'GITHUB_TOKEN') continue;
       
-      envExists = data.environments.some(env => env.name === 'production');
-    } catch (error) {
-      console.log(chalk.yellow('Could not fetch environments, will attempt to create if needed.'));
-    }
-    
-    if (!envExists) {
-      try {
-        console.log(chalk.yellow('Creating "production" environment...'));
-        await octokit.request('PUT /repos/{owner}/{repo}/environments/{environment_name}', {
-          owner: repoInfo.owner,
-          repo: repoInfo.repo,
-          environment_name: 'production'
-        });
-      } catch (error) {
-        console.error(chalk.red(`✗ Failed to create environment: ${error.message}`));
-        console.log(chalk.yellow('Will attempt to set variables anyway.'));
-      }
-    }
-    
-    // Set environment variables
-    for (const varName of ENV_VARS) {
       const value = envConfig[varName];
       
       if (!value) {
-        console.log(chalk.red(`✗ Missing value for ${varName}`));
-        missingEnvVars.push(varName);
+        console.log(chalk.yellow(`⚠ Skipping empty value for ${varName}`));
         continue;
       }
       
-      // Set the environment variable
-      await setEnvironmentVariable(octokit, repoInfo, varName, value);
+      // Set the variable as a secret
+      const success = await setSecret(octokit, repoInfo, varName, value, publicKey, publicKeyId);
+      if (!success) {
+        failedVariables.push(varName);
+      }
     }
 
     // Print summary
     console.log(chalk.blue('=========================================================='));
     
-    if (missingSecrets.length === 0 && missingEnvVars.length === 0) {
+    if (failedVariables.length === 0) {
       console.log(chalk.green('✓ All variables synced successfully!'));
     } else {
-      console.log(chalk.yellow('⚠ The following variables were missing:'));
-      
-      if (missingSecrets.length > 0) {
-        console.log(chalk.yellow('  Secrets:'));
-        missingSecrets.forEach(secret => {
-          console.log(`    - ${secret}`);
-        });
-      }
-      
-      if (missingEnvVars.length > 0) {
-        console.log(chalk.yellow('  Environment Variables:'));
-        missingEnvVars.forEach(envVar => {
-          console.log(`    - ${envVar}`);
-        });
-      }
-      
-      console.log(chalk.yellow(`Please add them to your ${envFilePath} file and run this script again.`));
+      console.log(chalk.yellow('⚠ The following variables failed to sync:'));
+      failedVariables.forEach(varName => {
+        console.log(`  - ${varName}`);
+      });
     }
     
     console.log(chalk.blue('=========================================================='));

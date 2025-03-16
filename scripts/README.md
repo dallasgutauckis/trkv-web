@@ -1,6 +1,6 @@
-# GitHub Secrets & Variables Sync Scripts
+# GitHub Secrets Sync Scripts
 
-This directory contains scripts to sync your local environment variables to GitHub repository secrets and environment variables, which are required for the GitHub Actions deployment workflow.
+This directory contains scripts to sync your local environment variables to GitHub repository secrets, which are required for the GitHub Actions deployment workflow.
 
 ## Available Scripts
 
@@ -11,27 +11,22 @@ Two versions of the script are provided:
 
 Choose the one that best fits your workflow and environment.
 
-## What's the Difference Between Secrets and Variables?
+## Command-Line Arguments
 
-- **Secrets**: For sensitive information (API keys, tokens, passwords). These are encrypted and masked in logs.
-- **Environment Variables**: For non-sensitive information (project IDs, URLs, region names). These are visible in logs.
+Both scripts support the following command-line arguments:
 
-## How Variables Are Categorized
+- `--help` or `-h`: Display help message
+- `--env-file <file>` or `-e <file>`: Specify a custom .env file path (default: ./.env)
 
-The scripts categorize variables from your `.env` file as follows:
+## How Variables Are Handled
 
-### Secrets (Sensitive)
-- `TWITCH_CLIENT_ID`
-- `TWITCH_CLIENT_SECRET`
-- `NEXTAUTH_SECRET`
-- `SERVICE_ACCOUNT`
-- `WORKLOAD_IDENTITY_PROVIDER`
+The scripts will read **all variables** from your `.env` file and upload them as GitHub secrets. There is no longer any distinction between "sensitive" and "non-sensitive" variables - all variables are treated as secrets for maximum security.
 
-### Environment Variables (Non-Sensitive)
-- `PROJECT_ID`
-- `NEXTAUTH_URL`
-- `API_BASE_URL`
-- `REGION`
+The scripts will:
+1. Parse all variable name/value pairs from your `.env` file
+2. Upload each variable as an encrypted GitHub secret
+3. Skip the GITHUB_TOKEN variable (to avoid recursion issues)
+4. Skip variables with empty values
 
 ## Prerequisites
 
