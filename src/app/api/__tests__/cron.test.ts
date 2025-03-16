@@ -2,43 +2,48 @@ import { NextResponse } from 'next/server';
 import { POST } from '../cron/remove-expired-vips/route';
 import { removeVIPStatus } from '@/lib/twitch';
 import { getActiveVIPSessions, deactivateVIPSession, logAuditEvent } from '@/lib/db';
+import { headers } from 'next/headers';
 
 // Mock dependencies
 jest.mock('@/lib/twitch');
 jest.mock('@/lib/db');
+jest.mock('next/headers');
 
 describe('Automated VIP Removal Integration', () => {
   const mockVIPSessions = [
     {
-      id: 'expired-session-1',
-      channelId: 'channel-1',
-      userId: 'user-1',
-      username: 'User1',
-      startedAt: new Date(Date.now() - 13 * 60 * 60 * 1000), // 13 hours ago
+      id: '1',
+      channelId: 'test-channel',
+      userId: 'test-user',
+      username: 'test-user',
+      grantedAt: new Date(Date.now() - 13 * 60 * 60 * 1000), // 13 hours ago
       expiresAt: new Date(Date.now() - 1 * 60 * 60 * 1000), // 1 hour ago
       isActive: true,
-      redeemedWith: 'channel_points',
+      grantedBy: 'system',
+      grantMethod: 'manual',
     },
     {
-      id: 'expired-session-2',
-      channelId: 'channel-1',
-      userId: 'user-2',
-      username: 'User2',
-      startedAt: new Date(Date.now() - 13 * 60 * 60 * 1000), // 13 hours ago
+      id: '2',
+      channelId: 'test-channel',
+      userId: 'test-user-2',
+      username: 'test-user-2',
+      grantedAt: new Date(Date.now() - 13 * 60 * 60 * 1000), // 13 hours ago
       expiresAt: new Date(Date.now() - 1 * 60 * 60 * 1000), // 1 hour ago
       isActive: true,
-      redeemedWith: 'manual',
+      grantedBy: 'system',
+      grantMethod: 'manual',
     },
     {
-      id: 'active-session',
-      channelId: 'channel-2',
-      userId: 'user-3',
-      username: 'User3',
-      startedAt: new Date(),
+      id: '3',
+      channelId: 'test-channel',
+      userId: 'test-user-3',
+      username: 'test-user-3',
+      grantedAt: new Date(),
       expiresAt: new Date(Date.now() + 11 * 60 * 60 * 1000), // 11 hours from now
       isActive: true,
-      redeemedWith: 'channel_points',
-    },
+      grantedBy: 'system',
+      grantMethod: 'manual',
+    }
   ];
 
   beforeEach(() => {
@@ -49,15 +54,12 @@ describe('Automated VIP Removal Integration', () => {
 
   describe('Cron Job Execution', () => {
     it('processes expired VIP sessions successfully', async () => {
-      const headers = new Headers();
-      headers.set('Authorization', `Bearer ${process.env.CRON_SECRET}`);
+      // Mock the headers function to return authorized headers
+      const mockHeadersInstance = new Headers();
+      mockHeadersInstance.set('Authorization', `Bearer ${process.env.CRON_SECRET}`);
+      (headers as jest.Mock).mockReturnValue(mockHeadersInstance);
 
-      const request = new Request('http://localhost/api/cron/remove-expired-vips', {
-        method: 'POST',
-        headers,
-      });
-
-      const response = await POST(request);
+      const response = await POST();
       const data = await response.json();
 
       // Verify response
@@ -106,16 +108,13 @@ describe('Automated VIP Removal Integration', () => {
 
     it('handles no expired sessions', async () => {
       (getActiveVIPSessions as jest.Mock).mockResolvedValue([mockVIPSessions[2]]); // Only active session
+      
+      // Mock the headers function to return authorized headers
+      const mockHeadersInstance = new Headers();
+      mockHeadersInstance.set('Authorization', `Bearer ${process.env.CRON_SECRET}`);
+      (headers as jest.Mock).mockReturnValue(mockHeadersInstance);
 
-      const headers = new Headers();
-      headers.set('Authorization', `Bearer ${process.env.CRON_SECRET}`);
-
-      const request = new Request('http://localhost/api/cron/remove-expired-vips', {
-        method: 'POST',
-        headers,
-      });
-
-      const response = await POST(request);
+      const response = await POST();
       const data = await response.json();
 
       // Verify response
@@ -137,15 +136,12 @@ describe('Automated VIP Removal Integration', () => {
         .mockResolvedValueOnce(false) // First removal fails
         .mockResolvedValueOnce(true); // Second removal succeeds
 
-      const headers = new Headers();
-      headers.set('Authorization', `Bearer ${process.env.CRON_SECRET}`);
+      // Mock the headers function to return authorized headers
+      const mockHeadersInstance = new Headers();
+      mockHeadersInstance.set('Authorization', `Bearer ${process.env.CRON_SECRET}`);
+      (headers as jest.Mock).mockReturnValue(mockHeadersInstance);
 
-      const request = new Request('http://localhost/api/cron/remove-expired-vips', {
-        method: 'POST',
-        headers,
-      });
-
-      const response = await POST(request);
+      const response = await POST();
       const data = await response.json();
 
       // Verify response
@@ -162,11 +158,11 @@ describe('Automated VIP Removal Integration', () => {
     });
 
     it('rejects unauthorized requests', async () => {
-      const request = new Request('http://localhost/api/cron/remove-expired-vips', {
-        method: 'POST',
-      });
+      // Mock the headers function to return unauthorized headers
+      const mockHeadersInstance = new Headers();
+      (headers as jest.Mock).mockReturnValue(mockHeadersInstance);
 
-      const response = await POST(request);
+      const response = await POST();
 
       expect(response.status).toBe(401);
       expect(await response.text()).toBe('Unauthorized');

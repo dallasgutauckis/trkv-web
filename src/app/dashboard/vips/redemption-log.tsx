@@ -38,7 +38,13 @@ export default function RedemptionLog() {
         }
         
         const data = await response.json();
-        setLogs(data);
+        // Transform the data to ensure timestamps are Date objects
+        const transformedLogs = Array.isArray(data) ? data.map(log => ({
+          ...log,
+          timestamp: new Date(log.timestamp._seconds ? log.timestamp._seconds * 1000 : log.timestamp)
+        })) : [];
+        
+        setLogs(transformedLogs);
       } catch (err) {
         console.error('Error fetching audit logs:', err);
         setError('Failed to load audit logs. Please try again.');
@@ -50,10 +56,10 @@ export default function RedemptionLog() {
     fetchLogs();
   }, [session]);
 
-  // Filter logs to only show VIP grants and extensions
-  const vipLogs = logs.filter(log => 
+  // Ensure logs is an array before filtering
+  const vipLogs = Array.isArray(logs) ? logs.filter(log => 
     log.action === 'grant_vip' || log.action === 'extend_vip'
-  );
+  ) : [];
 
   function getActionText(log: AuditLogEntry): string {
     switch (log.action) {
@@ -86,7 +92,7 @@ export default function RedemptionLog() {
   }
 
   return (
-    <Card>
+    <Card className="bg-background border-border">
       <CardHeader>
         <CardTitle>VIP Activity Log</CardTitle>
         <CardDescription>
@@ -115,7 +121,7 @@ export default function RedemptionLog() {
                     </span>
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    {formatDate(new Date(log.timestamp))}
+                    {formatDate(log.timestamp)}
                   </div>
                 </div>
                 {log.details?.rewardTitle && (

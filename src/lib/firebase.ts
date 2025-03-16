@@ -1,29 +1,37 @@
-import { initializeApp, cert, getApps } from 'firebase-admin/app';
+import { initializeApp, cert, getApps, applicationDefault } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 
 // Initialize Firebase Admin if it hasn't been initialized yet
 if (!getApps().length) {
-  // Check if we're using service account credentials or environment variables
   try {
-    // Try to initialize with service account if available
-    const serviceAccount = process.env.GOOGLE_APPLICATION_CREDENTIALS 
-      ? require(process.env.GOOGLE_APPLICATION_CREDENTIALS)
-      : null;
-    
-    if (serviceAccount) {
+    // In Google Cloud Run, we can use the default credentials
+    if (process.env.K_SERVICE) {
+      console.log('Initializing Firebase Admin in Google Cloud Run environment');
       initializeApp({
-        credential: cert(serviceAccount),
-        databaseURL: process.env.DATABASE_URL,
+        credential: applicationDefault(),
+        projectId: process.env.PROJECT_ID || 'terkvs-thing',
       });
-    } else {
-      // Initialize with default credentials (works in Google Cloud environment)
+    }
+    // For local development with service account
+    else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      console.log('Initializing Firebase Admin with service account');
       initializeApp({
+        credential: applicationDefault(),
+        projectId: process.env.PROJECT_ID || 'terkvs-thing',
+      });
+    }
+    // Fallback for other environments
+    else {
+      console.log('Initializing Firebase Admin with default configuration');
+      initializeApp({
+        credential: applicationDefault(),
         projectId: process.env.PROJECT_ID || 'terkvs-thing',
       });
     }
   } catch (error) {
     console.error('Error initializing Firebase Admin:', error);
     // Initialize with default credentials as fallback
+    console.log('Falling back to default Firebase Admin initialization');
     initializeApp();
   }
 }

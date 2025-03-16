@@ -8,10 +8,6 @@ const nextConfig = {
             'jtvnw.net',             // Base Twitch CDN domain
         ],
     },
-    // Ensure proper handling of WebSocket connections
-    experimental: {
-        serverActions: true,
-    },
     // Configure headers for SSE and WebSocket support
     async headers() {
         return [

@@ -304,84 +304,68 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
 
   return (
     <div className="space-y-8">
-      {error && (
-        <div className="p-4 text-sm bg-red-900/30 border border-red-800 text-red-300 rounded-lg">
-          {error}
-        </div>
-      )}
-      
-      <div className="space-y-4">
-        <div>
-          <label
-            htmlFor="reward"
-            className="block text-sm font-medium"
-          >
-            Select Existing Reward
-          </label>
-          <select
-            id="reward"
-            value={selectedRewardId}
-            onChange={(e) => setSelectedRewardId(e.target.value)}
-            className="mt-1 block w-full rounded-md border border-[#2F2F35] bg-[#1F1F23] text-[#EFEFF1] px-3 py-2 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
-            disabled={isFetching}
-          >
-            <option value="">
-              {isFetching ? "Loading rewards..." : "Select a reward"}
-            </option>
-            {rewards.map((reward) => (
-              <option 
-                key={reward.id} 
-                value={reward.id}
+      <div className="p-6 bg-background border-border rounded-lg border shadow-sm">
+        <h2 className="text-xl font-semibold mb-4">Select a Channel Point Reward</h2>
+        {isFetching ? (
+          <div className="text-center py-4">Loading rewards...</div>
+        ) : error ? (
+          <div className="text-red-500">{error}</div>
+        ) : rewards.length === 0 ? (
+          <div className="text-muted-foreground">No channel point rewards found.</div>
+        ) : (
+          <div className="space-y-4">
+            <div className="relative">
+              <select
+                value={selectedRewardId}
+                onChange={(e) => setSelectedRewardId(e.target.value)}
+                className="w-full p-2 pr-8 bg-background border-border rounded border"
               >
-                {reward.title} ({reward.cost.toLocaleString()} points)
-                {reward.isEnabled === false ? ' (Disabled)' : ''}
-              </option>
-            ))}
-          </select>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {isFetching ? "Loading rewards..." :
-              rewards.length > 0 
-                ? `${rewards.length} existing reward${rewards.length === 1 ? '' : 's'} found` 
-                : "No channel point rewards found"
-            }
-          </p>
-        </div>
+                <option value="">Select a reward...</option>
+                {rewards.map((reward) => (
+                  <option key={reward.id} value={reward.id}>
+                    {reward.title} ({reward.cost} points)
+                  </option>
+                ))}
+              </select>
+            </div>
 
-        {selectedReward && (
-          <div className="p-4 rounded-md border border-[#2F2F35] bg-[#1F1F23]">
-            <h3 className="font-medium mb-2">Selected Reward Details</h3>
-            <p><strong>Title:</strong> {selectedReward.title}</p>
-            <p><strong>Cost:</strong> {selectedReward.cost.toLocaleString()} points</p>
-            <p><strong>Status:</strong> {selectedReward.isEnabled ? 'Enabled' : 'Disabled'}</p>
-            {selectedReward.prompt && (
-              <p><strong>Description:</strong> {selectedReward.prompt}</p>
-            )}
-            {selectedReward.backgroundColor && (
-              <div className="mt-2 flex items-center">
-                <span className="mr-2"><strong>Color:</strong></span>
-                <div 
-                  className="w-6 h-6 rounded-full border border-[#2F2F35]" 
-                  style={{ backgroundColor: selectedReward.backgroundColor }}
-                ></div>
+            {selectedReward && (
+              <div className="p-4 rounded-md border border-border bg-background/50">
+                <h3 className="font-medium mb-2">Selected Reward Details</h3>
+                <p><strong>Title:</strong> {selectedReward.title}</p>
+                <p><strong>Cost:</strong> {selectedReward.cost.toLocaleString()} points</p>
+                <p><strong>Status:</strong> {selectedReward.isEnabled ? 'Enabled' : 'Disabled'}</p>
+                {selectedReward.prompt && (
+                  <p><strong>Description:</strong> {selectedReward.prompt}</p>
+                )}
+                {selectedReward.backgroundColor && (
+                  <div className="mt-2 flex items-center">
+                    <span className="mr-2"><strong>Color:</strong></span>
+                    <div 
+                      className="w-6 h-6 rounded-full border border-border" 
+                      style={{ backgroundColor: selectedReward.backgroundColor }}
+                    ></div>
+                  </div>
+                )}
+                
+                <div className="mt-4">
+                  <Button
+                    onClick={handleSaveReward}
+                    disabled={isSaving}
+                    className="bg-purple-600 hover:bg-purple-700"
+                  >
+                    {isSaving ? "Saving..." : "Save Selection"}
+                  </Button>
+                </div>
               </div>
             )}
-            
-            <div className="mt-4">
-              <Button
-                onClick={handleSaveReward}
-                disabled={isSaving}
-                className="bg-purple-600 hover:bg-purple-700"
-              >
-                {isSaving ? "Saving..." : "Save Selection"}
-              </Button>
-            </div>
           </div>
         )}
       </div>
       
       {/* Add monitoring settings section */}
       {selectedReward && (
-        <div className="mt-8 p-6 bg-[#1F1F23] rounded-lg border border-[#2F2F35] shadow-sm">
+        <div className="mt-8 p-6 bg-background border-border rounded-lg border shadow-sm">
           <h3 className="text-xl font-semibold mb-4">Automatic VIP Granting</h3>
           <p className="text-muted-foreground mb-6">
             When enabled, viewers who redeem this reward will automatically be granted VIP status

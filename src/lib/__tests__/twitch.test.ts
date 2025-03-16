@@ -1,4 +1,4 @@
-import { ApiClient } from '@twurple/api';
+import { ApiClient, HelixChannelApi, HelixChannelPointsApi, HelixUserRelation, HelixPaginatedResult, HelixCustomReward } from '@twurple/api';
 import { grantVIPStatus, removeVIPStatus, isUserVIP, createChannelPointReward } from '../twitch';
 
 // Mock @twurple/api
@@ -11,7 +11,16 @@ describe('Twitch VIP Management', () => {
   const mockUserId = 'test-user';
   const mockRewardId = 'test-reward';
 
-  let mockApiClient: jest.Mocked<Partial<ApiClient>>;
+  let mockApiClient: {
+    channels: {
+      addVip: jest.Mock;
+      removeVip: jest.Mock;
+      getVips: jest.Mock;
+    };
+    channelPoints: {
+      createCustomReward: jest.Mock;
+    };
+  };
 
   beforeEach(() => {
     mockApiClient = {
@@ -30,24 +39,34 @@ describe('Twitch VIP Management', () => {
 
   describe('grantVIPStatus', () => {
     it('grants VIP status successfully', async () => {
-      mockApiClient.channels!.addVip.mockResolvedValue(undefined);
+      mockApiClient.channels.addVip.mockResolvedValue(undefined);
 
-      const result = await grantVIPStatus(mockChannelId, mockUserId);
+      const result = await grantVIPStatus({
+        channelId: mockChannelId,
+        userId: mockUserId,
+        username: 'test-user',
+        grantedBy: 'system',
+      });
 
-      expect(result).toBe(true);
-      expect(mockApiClient.channels!.addVip).toHaveBeenCalledWith(
+      expect(result.success).toBe(true);
+      expect(mockApiClient.channels.addVip).toHaveBeenCalledWith(
         mockChannelId,
         mockUserId
       );
     });
 
     it('handles errors when granting VIP status', async () => {
-      mockApiClient.channels!.addVip.mockRejectedValue(new Error('API Error'));
+      mockApiClient.channels.addVip.mockRejectedValue(new Error('API Error'));
 
-      const result = await grantVIPStatus(mockChannelId, mockUserId);
+      const result = await grantVIPStatus({
+        channelId: mockChannelId,
+        userId: mockUserId,
+        username: 'test-user',
+        grantedBy: 'system',
+      });
 
-      expect(result).toBe(false);
-      expect(mockApiClient.channels!.addVip).toHaveBeenCalledWith(
+      expect(result.success).toBe(false);
+      expect(mockApiClient.channels.addVip).toHaveBeenCalledWith(
         mockChannelId,
         mockUserId
       );
@@ -56,24 +75,24 @@ describe('Twitch VIP Management', () => {
 
   describe('removeVIPStatus', () => {
     it('removes VIP status successfully', async () => {
-      mockApiClient.channels!.removeVip.mockResolvedValue(undefined);
+      mockApiClient.channels.removeVip.mockResolvedValue(undefined);
 
       const result = await removeVIPStatus(mockChannelId, mockUserId);
 
       expect(result).toBe(true);
-      expect(mockApiClient.channels!.removeVip).toHaveBeenCalledWith(
+      expect(mockApiClient.channels.removeVip).toHaveBeenCalledWith(
         mockChannelId,
         mockUserId
       );
     });
 
     it('handles errors when removing VIP status', async () => {
-      mockApiClient.channels!.removeVip.mockRejectedValue(new Error('API Error'));
+      mockApiClient.channels.removeVip.mockRejectedValue(new Error('API Error'));
 
       const result = await removeVIPStatus(mockChannelId, mockUserId);
 
       expect(result).toBe(false);
-      expect(mockApiClient.channels!.removeVip).toHaveBeenCalledWith(
+      expect(mockApiClient.channels.removeVip).toHaveBeenCalledWith(
         mockChannelId,
         mockUserId
       );
@@ -82,34 +101,38 @@ describe('Twitch VIP Management', () => {
 
   describe('isUserVIP', () => {
     it('returns true when user is a VIP', async () => {
-      mockApiClient.channels!.getVips.mockResolvedValue({
-        data: [{ id: mockUserId }],
-      } as any);
+      const mockResult: Partial<HelixPaginatedResult<HelixUserRelation>> = {
+        data: [{ id: mockUserId } as HelixUserRelation],
+      };
+      
+      mockApiClient.channels.getVips.mockResolvedValue(mockResult);
 
       const result = await isUserVIP(mockChannelId, mockUserId);
 
       expect(result).toBe(true);
-      expect(mockApiClient.channels!.getVips).toHaveBeenCalledWith(mockChannelId);
+      expect(mockApiClient.channels.getVips).toHaveBeenCalledWith(mockChannelId);
     });
 
     it('returns false when user is not a VIP', async () => {
-      mockApiClient.channels!.getVips.mockResolvedValue({
-        data: [{ id: 'other-user' }],
-      } as any);
+      const mockResult: Partial<HelixPaginatedResult<HelixUserRelation>> = {
+        data: [{ id: 'other-user' } as HelixUserRelation],
+      };
+      
+      mockApiClient.channels.getVips.mockResolvedValue(mockResult);
 
       const result = await isUserVIP(mockChannelId, mockUserId);
 
       expect(result).toBe(false);
-      expect(mockApiClient.channels!.getVips).toHaveBeenCalledWith(mockChannelId);
+      expect(mockApiClient.channels.getVips).toHaveBeenCalledWith(mockChannelId);
     });
 
     it('handles errors when checking VIP status', async () => {
-      mockApiClient.channels!.getVips.mockRejectedValue(new Error('API Error'));
+      mockApiClient.channels.getVips.mockRejectedValue(new Error('API Error'));
 
       const result = await isUserVIP(mockChannelId, mockUserId);
 
       expect(result).toBe(false);
-      expect(mockApiClient.channels!.getVips).toHaveBeenCalledWith(mockChannelId);
+      expect(mockApiClient.channels.getVips).toHaveBeenCalledWith(mockChannelId);
     });
   });
 
@@ -118,9 +141,11 @@ describe('Twitch VIP Management', () => {
     const mockCost = 5000;
 
     it('creates channel point reward successfully', async () => {
-      mockApiClient.channelPoints!.createCustomReward.mockResolvedValue({
+      const mockReward: Partial<HelixCustomReward> = {
         id: mockRewardId,
-      } as any);
+      };
+      
+      mockApiClient.channelPoints.createCustomReward.mockResolvedValue(mockReward);
 
       const result = await createChannelPointReward(
         mockChannelId,
@@ -129,7 +154,7 @@ describe('Twitch VIP Management', () => {
       );
 
       expect(result).toBe(mockRewardId);
-      expect(mockApiClient.channelPoints!.createCustomReward).toHaveBeenCalledWith(
+      expect(mockApiClient.channelPoints.createCustomReward).toHaveBeenCalledWith(
         mockChannelId,
         expect.objectContaining({
           title: mockTitle,
@@ -141,7 +166,7 @@ describe('Twitch VIP Management', () => {
     });
 
     it('handles errors when creating channel point reward', async () => {
-      mockApiClient.channelPoints!.createCustomReward.mockRejectedValue(
+      mockApiClient.channelPoints.createCustomReward.mockRejectedValue(
         new Error('API Error')
       );
 
@@ -152,7 +177,7 @@ describe('Twitch VIP Management', () => {
       );
 
       expect(result).toBeNull();
-      expect(mockApiClient.channelPoints!.createCustomReward).toHaveBeenCalled();
+      expect(mockApiClient.channelPoints.createCustomReward).toHaveBeenCalled();
     });
   });
 }); 

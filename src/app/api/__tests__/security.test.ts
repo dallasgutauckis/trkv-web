@@ -1,11 +1,13 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
 import { getServerSession } from 'next-auth/next';
 import { POST as grantVIP, DELETE as removeVIP, GET as getVIPs } from '../vip/route';
 import { POST as cronJob } from '../cron/remove-expired-vips/route';
 import { GET as wsEndpoint } from '../ws/route';
+import { headers } from 'next/headers';
 
 // Mock dependencies
 jest.mock('next-auth/next');
+jest.mock('next/headers');
 
 describe('API Security', () => {
   beforeEach(() => {
@@ -17,7 +19,7 @@ describe('API Security', () => {
       (getServerSession as jest.Mock).mockResolvedValue(null);
 
       // Test POST /api/vip
-      const postRequest = new Request('http://localhost/api/vip', {
+      const postRequest = new NextRequest('http://localhost/api/vip', {
         method: 'POST',
         body: JSON.stringify({
           userId: 'test-user',
@@ -30,17 +32,18 @@ describe('API Security', () => {
       expect(postResponse.status).toBe(401);
 
       // Test DELETE /api/vip
-      const deleteRequest = new Request(
-        'http://localhost/api/vip?sessionId=test&channelId=test&userId=test',
-        { method: 'DELETE' }
-      );
+      const deleteURL = new URL('http://localhost/api/vip');
+      deleteURL.searchParams.append('sessionId', 'test');
+      deleteURL.searchParams.append('channelId', 'test');
+      deleteURL.searchParams.append('userId', 'test');
+      const deleteRequest = new NextRequest(deleteURL, { method: 'DELETE' });
       const deleteResponse = await removeVIP(deleteRequest);
       expect(deleteResponse.status).toBe(401);
 
       // Test GET /api/vip
-      const getRequest = new Request('http://localhost/api/vip?channelId=test', {
-        method: 'GET',
-      });
+      const getURL = new URL('http://localhost/api/vip');
+      getURL.searchParams.append('channelId', 'test');
+      const getRequest = new NextRequest(getURL);
       const getResponse = await getVIPs(getRequest);
       expect(getResponse.status).toBe(401);
     });
@@ -48,12 +51,12 @@ describe('API Security', () => {
     it('rejects unauthenticated WebSocket connections', async () => {
       (getServerSession as jest.Mock).mockResolvedValue(null);
 
-      const headers = new Headers();
-      headers.set('upgrade', 'websocket');
+      const wsHeaders = new Headers();
+      wsHeaders.set('upgrade', 'websocket');
 
-      const request = new Request('http://localhost/api/ws?channelId=test', {
-        headers,
-      });
+      const wsURL = new URL('http://localhost/api/ws');
+      wsURL.searchParams.append('channelId', 'test');
+      const request = new NextRequest(wsURL, { headers: wsHeaders });
       const response = await wsEndpoint(request);
       expect(response.status).toBe(401);
     });
@@ -73,14 +76,12 @@ describe('API Security', () => {
 
     it('validates request parameters', async () => {
       // Test missing channelId
-      const getRequest = new Request('http://localhost/api/vip', {
-        method: 'GET',
-      });
+      const getRequest = new NextRequest('http://localhost/api/vip');
       const getResponse = await getVIPs(getRequest);
       expect(getResponse.status).toBe(400);
 
       // Test invalid JSON body
-      const postRequest = new Request('http://localhost/api/vip', {
+      const postRequest = new NextRequest('http://localhost/api/vip', {
         method: 'POST',
         body: JSON.stringify({
           // Missing required fields
@@ -90,7 +91,7 @@ describe('API Security', () => {
       expect(postResponse.status).toBe(400);
 
       // Test missing query parameters
-      const deleteRequest = new Request('http://localhost/api/vip', {
+      const deleteRequest = new NextRequest('http://localhost/api/vip', {
         method: 'DELETE',
       });
       const deleteResponse = await removeVIP(deleteRequest);
@@ -98,24 +99,20 @@ describe('API Security', () => {
     });
 
     it('validates cron job authorization', async () => {
+      // Mock the headers function for unauthorized requests
+      const mockHeadersInstance = new Headers();
+      (headers as jest.Mock).mockReturnValue(mockHeadersInstance);
+
       // Test without authorization header
-      const request = new Request('http://localhost/api/cron/remove-expired-vips', {
-        method: 'POST',
-      });
-      const response = await cronJob(request);
+      const response = await cronJob();
       expect(response.status).toBe(401);
 
       // Test with invalid authorization
-      const headers = new Headers();
-      headers.set('Authorization', 'Bearer invalid-token');
-      const invalidRequest = new Request(
-        'http://localhost/api/cron/remove-expired-vips',
-        {
-          method: 'POST',
-          headers,
-        }
-      );
-      const invalidResponse = await cronJob(invalidRequest);
+      const mockHeadersWithInvalidAuth = new Headers();
+      mockHeadersWithInvalidAuth.set('Authorization', 'Bearer invalid-token');
+      (headers as jest.Mock).mockReturnValue(mockHeadersWithInvalidAuth);
+      
+      const invalidResponse = await cronJob();
       expect(invalidResponse.status).toBe(401);
     });
   });
@@ -134,15 +131,14 @@ describe('API Security', () => {
 
     it('sanitizes and validates input parameters', async () => {
       // Test with SQL injection attempt
-      const sqlInjectionRequest = new Request(
-        'http://localhost/api/vip?channelId=1;DROP%20TABLE%20users;',
-        { method: 'GET' }
-      );
+      const sqlInjectionURL = new URL('http://localhost/api/vip');
+      sqlInjectionURL.searchParams.append('channelId', '1;DROP TABLE users;');
+      const sqlInjectionRequest = new NextRequest(sqlInjectionURL);
       const sqlInjectionResponse = await getVIPs(sqlInjectionRequest);
       expect(sqlInjectionResponse.status).toBe(400);
 
       // Test with XSS attempt
-      const xssRequest = new Request('http://localhost/api/vip', {
+      const xssRequest = new NextRequest('http://localhost/api/vip', {
         method: 'POST',
         body: JSON.stringify({
           userId: 'test-user',
@@ -161,7 +157,7 @@ describe('API Security', () => {
         channelId: 'x'.repeat(1000),
         redeemedWith: 'channel_points',
       };
-      const oversizedRequest = new Request('http://localhost/api/vip', {
+      const oversizedRequest = new NextRequest('http://localhost/api/vip', {
         method: 'POST',
         body: JSON.stringify(largePayload),
       });
@@ -170,22 +166,20 @@ describe('API Security', () => {
     });
 
     it('validates WebSocket connection parameters', async () => {
-      const headers = new Headers();
-      headers.set('upgrade', 'websocket');
+      const wsHeaders = new Headers();
+      wsHeaders.set('upgrade', 'websocket');
 
       // Test with invalid channelId
-      const invalidRequest = new Request(
-        'http://localhost/api/ws?channelId=<script>alert("xss")</script>',
-        { headers }
-      );
+      const invalidURL = new URL('http://localhost/api/ws');
+      invalidURL.searchParams.append('channelId', '<script>alert("xss")</script>');
+      const invalidRequest = new NextRequest(invalidURL, { headers: wsHeaders });
       const invalidResponse = await wsEndpoint(invalidRequest);
       expect(invalidResponse.status).toBe(400);
 
       // Test with missing upgrade header
-      const noUpgradeRequest = new Request(
-        'http://localhost/api/ws?channelId=test',
-        {}
-      );
+      const noUpgradeURL = new URL('http://localhost/api/ws');
+      noUpgradeURL.searchParams.append('channelId', 'test');
+      const noUpgradeRequest = new NextRequest(noUpgradeURL);
       const noUpgradeResponse = await wsEndpoint(noUpgradeRequest);
       expect(noUpgradeResponse.status).toBe(426);
     });
@@ -205,8 +199,11 @@ describe('API Security', () => {
 
     it('enforces rate limits on API endpoints', async () => {
       // Simulate rapid requests
+      const getURL = new URL('http://localhost/api/vip');
+      getURL.searchParams.append('channelId', 'test');
+      
       const requests = Array(10).fill(null).map(() =>
-        new Request('http://localhost/api/vip?channelId=test', { method: 'GET' })
+        new NextRequest(getURL)
       );
 
       const responses = await Promise.all(requests.map(req => getVIPs(req)));

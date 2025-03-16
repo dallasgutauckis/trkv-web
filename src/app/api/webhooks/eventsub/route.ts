@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createHmac } from 'crypto';
 import { grantVIPStatus } from '@/lib/twitch';
 import { createVIPSession, logAuditEvent } from '@/lib/db';
+import { VIPSession } from '@/types/database';
 
 const TWITCH_MESSAGE_ID = 'Twitch-Eventsub-Message-Id';
 const TWITCH_MESSAGE_TIMESTAMP = 'Twitch-Eventsub-Message-Timestamp';
@@ -56,22 +57,36 @@ export async function POST(req: Request) {
       const expiresAt = new Date(now.getTime() + 12 * 60 * 60 * 1000); // 12 hours
 
       // Grant VIP status
-      const success = await grantVIPStatus(
-        redemption.broadcaster_user_id,
-        redemption.user_id
-      );
+      const success = await grantVIPStatus({
+        channelId: redemption.broadcaster_user_id,
+        userId: redemption.user_id,
+        username: redemption.user_login,
+        grantedBy: 'system',
+        grantMethod: 'channelPoints',
+        metadata: {
+          rewardId: redemption.reward.id,
+          rewardTitle: redemption.reward.title
+        }
+      });
 
       if (success) {
         // Create VIP session
-        const vipSession = await createVIPSession({
+        const vipSessionData: Omit<VIPSession, 'id'> = {
           channelId: redemption.broadcaster_user_id,
           userId: redemption.user_id,
           username: redemption.user_login,
-          startedAt: now,
+          grantedAt: now,
           expiresAt,
           isActive: true,
-          redeemedWith: 'channel_points',
-        });
+          grantedBy: 'system',
+          grantMethod: 'channelPoints',
+          metadata: {
+            rewardId: redemption.reward.id,
+            rewardTitle: redemption.reward.title
+          }
+        };
+
+        const vipSession = await createVIPSession(vipSessionData);
 
         // Log audit event
         await logAuditEvent({

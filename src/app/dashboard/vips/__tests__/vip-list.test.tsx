@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import '@testing-library/jest-dom';
 import { toast } from 'react-hot-toast';
 import VIPList from '../vip-list';
 
@@ -10,30 +11,59 @@ jest.mock('react-hot-toast', () => ({
   },
 }));
 
+// Mock next-auth/react
+jest.mock('next-auth/react', () => ({
+  useSession: jest.fn(() => ({
+    data: {
+      accessToken: 'mock-token',
+    },
+    status: 'authenticated',
+    update: jest.fn(),
+  })),
+}));
+
 // Mock fetch
 global.fetch = jest.fn();
+
+// Mock EventSource
+class MockEventSource {
+  onmessage: ((event: any) => void) | null = null;
+  onopen: (() => void) | null = null;
+  onerror: ((error: any) => void) | null = null;
+  close = jest.fn();
+
+  constructor() {
+    setTimeout(() => {
+      if (this.onopen) this.onopen();
+    }, 0);
+  }
+}
+
+(global as any).EventSource = MockEventSource;
 
 describe('VIPList', () => {
   const mockVips = [
     {
       id: '1',
       channelId: 'test-channel',
-      userId: 'user1',
-      username: 'TestUser1',
-      startedAt: new Date(),
-      expiresAt: new Date(Date.now() + 3600000),
+      userId: 'test-user',
+      username: 'test-user',
+      grantedAt: new Date(),
+      expiresAt: new Date(),
       isActive: true,
-      redeemedWith: 'channel_points',
+      grantedBy: 'system',
+      grantMethod: 'manual',
     },
     {
       id: '2',
       channelId: 'test-channel',
-      userId: 'user2',
-      username: 'TestUser2',
-      startedAt: new Date(),
-      expiresAt: new Date(Date.now() + 7200000),
+      userId: 'test-user-2',
+      username: 'test-user-2',
+      grantedAt: new Date(),
+      expiresAt: new Date(),
       isActive: true,
-      redeemedWith: 'manual',
+      grantedBy: 'system',
+      grantMethod: 'manual',
     },
   ];
 
@@ -48,23 +78,23 @@ describe('VIPList', () => {
   });
 
   it('renders loading state initially', () => {
-    render(<VIPList channelId="test-channel" />);
+    render(<VIPList initialChannelId="test-channel" />);
     expect(screen.getByText('Loading VIP list...')).toBeInTheDocument();
   });
 
   it('renders error message when no channelId is provided', () => {
-    render(<VIPList />);
+    render(<VIPList initialChannelId="" />);
     expect(
       screen.getByText('Unable to load VIP list. Please try again later.')
     ).toBeInTheDocument();
   });
 
   it('renders VIP list after loading', async () => {
-    render(<VIPList channelId="test-channel" />);
+    render(<VIPList initialChannelId="test-channel" />);
 
     await waitFor(() => {
-      expect(screen.getByText('TestUser1')).toBeInTheDocument();
-      expect(screen.getByText('TestUser2')).toBeInTheDocument();
+      expect(screen.getByText('test-user')).toBeInTheDocument();
+      expect(screen.getByText('test-user-2')).toBeInTheDocument();
     });
 
     expect(screen.getByText('Via: Channel Points')).toBeInTheDocument();
@@ -86,7 +116,7 @@ describe('VIPList', () => {
         })
       );
 
-    render(<VIPList channelId="test-channel" />);
+    render(<VIPList initialChannelId="test-channel" />);
 
     await waitFor(() => {
       expect(screen.getAllByText('Remove VIP')).toHaveLength(2);
@@ -97,7 +127,7 @@ describe('VIPList', () => {
 
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith(
-        'Removed VIP status from TestUser1'
+        'Removed VIP status from test-user'
       );
     });
   });
@@ -116,7 +146,7 @@ describe('VIPList', () => {
         })
       );
 
-    render(<VIPList channelId="test-channel" />);
+    render(<VIPList initialChannelId="test-channel" />);
 
     await waitFor(() => {
       expect(screen.getAllByText('Remove VIP')).toHaveLength(2);
@@ -132,24 +162,26 @@ describe('VIPList', () => {
 
   it('handles WebSocket updates', async () => {
     const updatedVips = [mockVips[0]];
-    render(<VIPList channelId="test-channel" />);
+    render(<VIPList initialChannelId="test-channel" />);
 
     await waitFor(() => {
       expect(screen.getAllByText('Remove VIP')).toHaveLength(2);
     });
 
     // Simulate WebSocket message
-    const ws = (global as any).WebSocket.mock.instances[0];
-    ws.onmessage({
-      data: JSON.stringify({
-        type: 'vip_update',
-        vips: updatedVips,
-      }),
-    });
+    const ws = (global as any).EventSource.mock.instances[0];
+    if (ws.onmessage) {
+      ws.onmessage({
+        data: JSON.stringify({
+          type: 'vip_update',
+          vips: updatedVips,
+        }),
+      });
+    }
 
     await waitFor(() => {
       expect(screen.getAllByText('Remove VIP')).toHaveLength(1);
-      expect(screen.queryByText('TestUser2')).not.toBeInTheDocument();
+      expect(screen.queryByText('test-user-2')).not.toBeInTheDocument();
     });
   });
 }); 

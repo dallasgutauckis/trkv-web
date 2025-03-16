@@ -25,7 +25,7 @@ export default async function ChannelPointsPage() {
     return (
       <div className="container mx-auto py-10 px-4">
         <div className="max-w-4xl mx-auto">
-          <div className="bg-white rounded-lg shadow-sm border p-6">
+          <div className="bg-background border-border rounded-lg shadow-sm border p-6">
             <p className="text-red-600">Error: Unable to load user data. Please try signing out and signing in again.</p>
           </div>
         </div>
@@ -38,7 +38,7 @@ export default async function ChannelPointsPage() {
     return (
       <div className="container mx-auto py-10 px-4">
         <div className="max-w-4xl mx-auto">
-          <div className="bg-white rounded-lg shadow-sm border p-6">
+          <div className="bg-background border-border rounded-lg shadow-sm border p-6">
             <p className="text-red-600">Error: Missing Twitch access token. Please try signing out and signing in again.</p>
           </div>
         </div>
@@ -50,12 +50,10 @@ export default async function ChannelPointsPage() {
     <div className="container mx-auto py-10 px-4">
       <div className="max-w-4xl mx-auto">
         <h1 className="text-4xl font-bold mb-8">Channel Points Configuration</h1>
-        <div className="bg-white rounded-lg shadow-sm border p-6">
-          <ChannelPointsForm 
-            initialChannelId={userSession.user.id} 
-            initialAccessToken={userSession.accessToken} 
-          />
-        </div>
+        <ChannelPointsForm 
+          initialChannelId={userSession.user.id} 
+          initialAccessToken={userSession.accessToken} 
+        />
       </div>
     </div>
   );

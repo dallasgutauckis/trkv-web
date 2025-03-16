@@ -5,6 +5,8 @@ import { createChannelPointReward, getChannelPointRewards } from '@/lib/twitch';
 import { getChannelPointReward, updateChannelPointReward } from '@/lib/db';
 import { createEventSubSubscriptions } from '@/lib/eventsub';
 import { authOptions } from '@/lib/auth';
+import { ChannelPointReward } from '@/types/database';
+import { randomUUID } from 'crypto';
 
 const createRewardSchema = z.object({
   channelId: z.string(),
@@ -56,13 +58,16 @@ export async function POST(req: Request) {
     }
 
     // Save reward configuration
-    const reward = {
-      id: rewardId,
+    const now = new Date();
+    const reward: ChannelPointReward = {
+      id: randomUUID(),
       channelId: body.channelId,
+      rewardId: rewardId,
       title: body.title,
       cost: body.cost,
       isEnabled: true,
-      autoFulfill: false,
+      createdAt: now,
+      updatedAt: now,
     };
 
     await updateChannelPointReward(reward);

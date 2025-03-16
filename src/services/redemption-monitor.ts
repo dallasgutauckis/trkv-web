@@ -4,9 +4,10 @@ import { EventSubWsListener } from '@twurple/eventsub-ws';
 import { grantVIPStatus } from '@/lib/twitch';
 import { getUserTokens, logAuditLog } from '@/lib/db';
 import type { UserTokens } from '@/types/database';
+import type { EventSubSubscription } from '@twurple/eventsub-base';
 
 // Map to store active listeners by channel ID
-const activeListeners = new Map<string, { listener: EventSubWsListener, subscriptions: string[] }>();
+const activeListeners = new Map<string, { listener: EventSubWsListener, subscriptions: EventSubSubscription[] }>();
 
 /**
  * Start monitoring channel point redemptions for a specific channel
@@ -129,7 +130,8 @@ export async function stopMonitoringRedemptions(channelId: string): Promise<void
     // Unsubscribe from all subscriptions
     for (const subscription of listenerData.subscriptions) {
       try {
-        await listenerData.listener.unsubscribe(subscription);
+        // Use the subscription's own unsubscribe method
+        await subscription.stop();
       } catch (error) {
         console.error(`Error unsubscribing from subscription for channel ${channelId}:`, error);
       }

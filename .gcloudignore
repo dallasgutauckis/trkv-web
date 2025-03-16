@@ -1,0 +1,24 @@
+# Ignore git and cache directories
+.git
+.gitignore
+.cache
+
+# Ignore node modules and build directories
+node_modules/
+.next/
+out/
+
+# Ignore development files
+*.log
+*.md
+*.test.*
+*.spec.*
+.env*
+.vscode/
+.idea/
+
+# Keep necessary files
+!.env.production
+!next.config.js
+!package.json
+!package-lock.json 
