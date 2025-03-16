@@ -8,5 +8,4 @@ pydantic==2.5.2
 aiohttp==3.9.1
 tenacity==8.2.3
 flask==2.3.3
-gunicorn==21.2.0
-hypercorn==0.15.0 
+gunicorn==21.2.0 

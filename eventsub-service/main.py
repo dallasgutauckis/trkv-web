@@ -32,8 +32,14 @@ from flask import Flask, jsonify
 load_dotenv()
 
 # Configure logging
-logging_client = gcp_logging.Client()
-logging_client.setup_logging()
+try:
+    logging_client = gcp_logging.Client()
+    logging_client.setup_logging()
+    logging_configured = True
+except Exception as e:
+    print(f"Failed to configure GCP logging: {e}")
+    logging_configured = False
+    logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger("eventsub-service")
 logger.setLevel(logging.INFO)
@@ -52,9 +58,6 @@ TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
 PROJECT_ID = os.getenv("PROJECT_ID")
 PORT = int(os.getenv("PORT", "8080"))
 
-# Create Flask app for health checks
-app = Flask(__name__)
-
 # Global service state
 service_status = {
     "status": "initializing",
@@ -64,33 +67,9 @@ service_status = {
     "session_id": SESSION_ID
 }
 
-@app.route('/')
-def home():
-    """Health check endpoint."""
-    service_status["uptime"] = int(time.time() - service_status["start_time"])
-    return jsonify(service_status)
-
-@app.route('/health')
-def health_check():
-    """Health check endpoint."""
-    return jsonify({"status": "ok"})
-
-@app.route('/status')
-def status():
-    """Detailed service status endpoint."""
-    detailed_status = {
-        **service_status,
-        "environment": {
-            "TWITCH_CLIENT_ID": TWITCH_CLIENT_ID is not None,
-            "TWITCH_CLIENT_SECRET": TWITCH_CLIENT_SECRET is not None,
-            "PROJECT_ID": PROJECT_ID,
-            "PORT": PORT
-        },
-        "logging_configured": logging_client is not None,
-        "session_id": SESSION_ID,
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
-    return jsonify(detailed_status)
+# Global service instance and background thread
+eventsub_service = None
+service_thread = None
 
 class EventSubService:
     def __init__(self):
@@ -639,4 +618,103 @@ async def shutdown(service):
     """Shutdown the service gracefully."""
     logger.info("Received shutdown signal")
     service_status["status"] = "shutting_down"
-    await service.shutdown() 
+    await service.shutdown()
+
+def create_app():
+    """Create and configure the Flask application."""
+    app = Flask(__name__)
+    
+    @app.route('/')
+    def home():
+        """Health check endpoint."""
+        service_status["uptime"] = int(time.time() - service_status["start_time"])
+        return jsonify(service_status)
+
+    @app.route('/health')
+    def health_check():
+        """Health check endpoint."""
+        return jsonify({"status": "ok"})
+
+    @app.route('/status')
+    def status():
+        """Detailed service status endpoint."""
+        detailed_status = {
+            **service_status,
+            "environment": {
+                "TWITCH_CLIENT_ID": TWITCH_CLIENT_ID is not None,
+                "TWITCH_CLIENT_SECRET": TWITCH_CLIENT_SECRET is not None,
+                "PROJECT_ID": PROJECT_ID,
+                "PORT": PORT
+            },
+            "logging_configured": logging_configured,
+            "session_id": SESSION_ID,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "thread_running": service_thread is not None and service_thread.is_alive() if service_thread else False,
+            "service_initialized": eventsub_service is not None
+        }
+        return jsonify(detailed_status)
+    
+    @app.route('/start', methods=['POST'])
+    def start_service():
+        """Start the EventSub service if it's not already running."""
+        global service_thread, eventsub_service
+        
+        if service_thread is None or not service_thread.is_alive():
+            service_thread = threading.Thread(target=run_service)
+            service_thread.daemon = True
+            service_thread.start()
+            return jsonify({"status": "started"})
+        return jsonify({"status": "already_running"})
+    
+    # Start the service in the background when the app starts
+    @app.before_first_request
+    def start_background_service():
+        """Start the service in the background after the first request."""
+        global service_thread
+        
+        if service_thread is None or not service_thread.is_alive():
+            service_thread = threading.Thread(target=run_service)
+            service_thread.daemon = True
+            service_thread.start()
+            logger.info("Started EventSub service in background thread")
+    
+    return app
+
+def run_service():
+    """Run the EventSub service in the current thread."""
+    global eventsub_service, service_status
+    
+    logger.info("Starting EventSub service")
+    
+    # Create event loop for this thread
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    try:
+        # Initialize service
+        eventsub_service = EventSubService()
+        
+        # Initialize and start the service
+        loop.run_until_complete(eventsub_service.initialize())
+        service_status["status"] = "running"
+        
+        # Keep the service running
+        while eventsub_service.keep_running:
+            service_status["connected_channels"] = len(eventsub_service.channels_to_monitor)
+            loop.run_until_complete(asyncio.sleep(1))
+    except Exception as e:
+        logger.error(f"Error in EventSub service: {str(e)}")
+        service_status["status"] = "error"
+    finally:
+        # Cleanup
+        if eventsub_service:
+            loop.run_until_complete(eventsub_service.shutdown())
+        loop.close()
+        logger.info("EventSub service stopped")
+
+# Create the application
+app = create_app()
+
+if __name__ == "__main__":
+    # Run the Flask app
+    app.run(host="0.0.0.0", port=PORT) 

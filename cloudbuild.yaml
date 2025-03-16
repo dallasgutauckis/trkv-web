@@ -111,6 +111,11 @@ steps:
       - '512Mi'
       - '--timeout'
       - '300s'
+      - '--startup-cpu-boost'
+      - '--startup-cpu-percentage'
+      - '100'
+      - '--container-healthcheck'
+      - 'initial-delay=10s,timeout=5s,path=/health'
       - '--set-env-vars'
       - 'TWITCH_CLIENT_ID=${_TWITCH_CLIENT_ID},TWITCH_CLIENT_SECRET=${_TWITCH_CLIENT_SECRET},PROJECT_ID=${PROJECT_ID},API_BASE_URL=${_API_BASE_URL}'
 
