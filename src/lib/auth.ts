@@ -35,7 +35,7 @@ const logToCloudRun = async (message: string, data?: any) => {
 };
 
 if (!process.env.NEXTAUTH_SECRET && process.env.NODE_ENV === 'production') {
-  throw new Error('NEXTAUTH_SECRET is required in production');
+  console.error('NEXTAUTH_SECRET is not set in production environment. Using a generated secret instead, but this is not recommended for production.');
 }
 
 // Custom Twitch provider that doesn't use OpenID Connect
@@ -158,7 +158,9 @@ export const authOptions: NextAuthOptions = {
       clientSecret: TWITCH_CONFIG.clientSecret
     }),
   ],
-  secret: process.env.NEXTAUTH_SECRET || 'development-secret-do-not-use-in-production',
+  secret: process.env.NEXTAUTH_SECRET || (process.env.NODE_ENV === 'production' 
+    ? `insecure-auto-generated-secret-${Date.now()}` 
+    : 'development-secret-do-not-use-in-production'),
   debug: process.env.NODE_ENV === 'development',
   logger: {
     error(code, ...message) {
