@@ -1,0 +1,42 @@
+name: Deploy to Google Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy Services
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Google Auth
+        id: auth
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+      
+      - name: Submit Cloud Build job
+        run: |-
+          gcloud builds submit --config=cloudbuild.yaml \
+            --substitutions=_TWITCH_CLIENT_ID=${{ secrets.TWITCH_CLIENT_ID }},_TWITCH_CLIENT_SECRET=${{ secrets.TWITCH_CLIENT_SECRET }},_NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }},_NEXTAUTH_URL=${{ secrets.NEXTAUTH_URL }},_API_BASE_URL=${{ secrets.API_BASE_URL }} \
+            --project=${{ secrets.GCP_PROJECT_ID }}
+      
+      - name: Show deployed URLs
+        run: |-
+          echo "Main App deployed to: $(gcloud run services describe trkv-web --region=us-east1 --format='value(status.url)')"
+          echo "EventSub Service deployed to: $(gcloud run services describe eventsub-service --region=us-east1 --format='value(status.url)')" 
