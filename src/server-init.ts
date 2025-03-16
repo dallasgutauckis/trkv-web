@@ -4,13 +4,14 @@ import { initializeAllMonitoring } from "@/services/eventsub-manager";
 
 // Track initialization to prevent multiple calls
 let isInitializing = false;
+let isInitialized = false;
 
 /**
  * Initialize server-side services
  * This function should be called when the server starts
  */
 export async function initializeServer() {
-  if (isInitializing) {
+  if (isInitializing || isInitialized) {
     return;
   }
 
@@ -19,6 +20,11 @@ export async function initializeServer() {
     console.log("[Server] Initializing EventSub monitoring service...");
     await initializeAllMonitoring();
     console.log("[Server] EventSub monitoring service initialized successfully");
+    
+    // Initialize redemption monitors
+    await initializeRedemptionMonitors();
+    
+    isInitialized = true;
   } catch (error) {
     console.error("[Server] Failed to initialize EventSub monitoring:", error);
     throw error;
@@ -64,8 +70,16 @@ async function initializeRedemptionMonitors() {
 }
 
 // Initialize the server when this module is imported
-initializeServer().catch((error) => {
-  console.error("[Server] Failed to initialize server:", error);
-  // Don't exit the process, as this might be running in a development environment
-  // where we want to show errors but keep the server running
-}); 
+if (process.env.NODE_ENV === 'production') {
+  console.log("[Server] Running in production mode, initializing server...");
+  initializeServer().catch((error) => {
+    console.error("[Server] Failed to initialize server:", error);
+    // In production, we want to exit if initialization fails
+    // This will cause the container to restart
+    if (process.env.NODE_ENV === 'production') {
+      process.exit(1);
+    }
+  });
+} else {
+  console.log("[Server] Running in development mode, server will be initialized on first request");
+} 
