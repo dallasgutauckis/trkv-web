@@ -106,14 +106,50 @@ The Twitch VIP Manager Bot is a web application that allows Twitch streamers to 
 - Stores channel and reward IDs
 - Tracks monitoring status
 
-### Deployment
+### Deployment Architecture
 
-- **Google Cloud Run**: Containerized deployment for scalability.
-- **Docker**: Containerization for consistent environments.
-- **Cloud Build**: CI/CD pipeline for automated deployments.
-- **Artifact Registry**: Storage for Docker images.
-- **Cloud Scheduler**: Triggers cron jobs for scheduled tasks.
-- **Multi-service Architecture**: Main web application and standalone EventSub service.
+The VIP Manager Bot uses a unified deployment architecture with two main components:
+
+### 1. Main Web Application
+
+- **Technology**: Next.js, React, TypeScript
+- **Purpose**: User interface, authentication, settings management
+- **Deployment**: Google Cloud Run
+- **Security**: Public-facing with OAuth authentication
+
+### 2. EventSub Service
+
+- **Technology**: Python, aiohttp, websockets
+- **Purpose**: Real-time monitoring of Twitch events via EventSub WebSockets API
+- **Deployment**: Google Cloud Run
+- **Security**: Private service with 1+ minimum instances for reliability
+
+### Unified Deployment Process
+
+Both services are deployed together using a unified CI/CD pipeline:
+
+1. Code is committed to the GitHub repository
+2. GitHub Actions workflow is triggered
+3. Google Cloud Build is invoked with the unified configuration
+4. Both services are built and deployed in sequence
+5. Service status is maintained in Firestore for monitoring and recovery
+
+### Data Storage
+
+- **Firestore**: Primary database for user data, VIP sessions, audit logs
+- **Collections**:
+  - `users`: User account information
+  - `vipSessions`: Active and historical VIP grants
+  - `channelPointRewards`: Channel point reward configurations
+  - `channelPointMonitoring`: Monitoring settings for EventSub service
+  - `serviceStatus`: Status tracking for the EventSub service
+
+### Inter-Service Communication
+
+- EventSub service updates its status in Firestore
+- Main app reads EventSub service status from Firestore
+- Both services share common data models and collections
+- Web app can view status and logs but cannot directly control the EventSub service
 
 ## Security Features
 
