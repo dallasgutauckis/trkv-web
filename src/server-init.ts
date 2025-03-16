@@ -1,20 +1,29 @@
 import { getActiveRedemptionMonitors, getUserTokens } from '@/lib/db';
 import { startMonitoringRedemptions } from '@/services/redemption-monitor';
+import { initializeAllMonitoring } from "@/services/eventsub-manager";
+
+// Track initialization to prevent multiple calls
+let isInitializing = false;
 
 /**
  * Initialize server-side services
  * This function should be called when the server starts
  */
 export async function initializeServer() {
-  console.log('Initializing server-side services...');
-  
+  if (isInitializing) {
+    return;
+  }
+
   try {
-    // Start all active redemption monitors
-    await initializeRedemptionMonitors();
-    
-    console.log('Server initialization complete');
+    isInitializing = true;
+    console.log("[Server] Initializing EventSub monitoring service...");
+    await initializeAllMonitoring();
+    console.log("[Server] EventSub monitoring service initialized successfully");
   } catch (error) {
-    console.error('Error during server initialization:', error);
+    console.error("[Server] Failed to initialize EventSub monitoring:", error);
+    throw error;
+  } finally {
+    isInitializing = false;
   }
 }
 
@@ -52,4 +61,11 @@ async function initializeRedemptionMonitors() {
   } catch (error) {
     console.error('Error initializing redemption monitors:', error);
   }
-} 
+}
+
+// Initialize the server when this module is imported
+initializeServer().catch((error) => {
+  console.error("[Server] Failed to initialize server:", error);
+  // Don't exit the process, as this might be running in a development environment
+  // where we want to show errors but keep the server running
+}); 

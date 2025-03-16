@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSession } from 'next-auth/react';
-import { toast } from 'react-hot-toast';
+import { toast } from 'sonner';
 
 // Event types from the server
 export type EventSubEventType = 
@@ -28,6 +28,38 @@ export function useEventStream(channelId?: string) {
   const [events, setEvents] = useState<EventSubEvent[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Function to add a new event to the events array
+  const addEvent = useCallback((eventData: EventSubEvent) => {
+    console.log('Received event:', eventData.type, eventData.data?.username);
+    
+    setEvents(prev => {
+      // Check if we already have this event (by comparing type, timestamp, and user)
+      const isDuplicate = prev.some(e => 
+        e.type === eventData.type && 
+        e.channelId === eventData.channelId &&
+        e.data?.userId === eventData.data?.userId &&
+        Math.abs(new Date(e.timestamp).getTime() - new Date(eventData.timestamp).getTime()) < 5000
+      );
+      
+      if (isDuplicate) {
+        console.log('Duplicate event detected, skipping');
+        return prev;
+      }
+      
+      // Add the new event at the beginning
+      return [eventData, ...prev].slice(0, 100); // Keep last 100 events
+    });
+    
+    // Show toast for important events
+    if (eventData.type === 'VIP_GRANTED') {
+      toast.success(`VIP granted to ${eventData.data?.username}`);
+    } else if (eventData.type === 'VIP_EXTENDED') {
+      toast.success(`VIP extended for ${eventData.data?.username}`);
+    } else if (eventData.type === 'VIP_GRANT_FAILED') {
+      toast.error(`Failed to grant VIP to ${eventData.data?.username}: ${eventData.data?.error}`);
+    }
+  }, []);
 
   useEffect(() => {
     if (!session?.user || !channelId) return;
@@ -59,23 +91,15 @@ export function useEventStream(channelId?: string) {
         eventSource.onmessage = (event) => {
           try {
             const eventData = JSON.parse(event.data) as EventSubEvent;
+            console.log('Received SSE message:', eventData);
             
             // Convert timestamp string to Date object
             if (typeof eventData.timestamp === 'string') {
               eventData.timestamp = new Date(eventData.timestamp);
             }
             
-            // Add event to state
-            setEvents(prev => [eventData, ...prev].slice(0, 100)); // Keep last 100 events
-            
-            // Show toast for important events
-            if (eventData.type === 'VIP_GRANTED') {
-              toast.success(`VIP granted to ${eventData.data?.username}`);
-            } else if (eventData.type === 'VIP_EXTENDED') {
-              toast.success(`VIP extended for ${eventData.data?.username}`);
-            } else if (eventData.type === 'VIP_GRANT_FAILED') {
-              toast.error(`Failed to grant VIP to ${eventData.data?.username}`);
-            }
+            // Process the event
+            addEvent(eventData);
           } catch (error) {
             console.error('Error parsing event data:', error);
           }
@@ -115,7 +139,7 @@ export function useEventStream(channelId?: string) {
         eventSource.close();
       }
     };
-  }, [session, channelId]);
+  }, [session, channelId, addEvent]);
 
   return {
     events,

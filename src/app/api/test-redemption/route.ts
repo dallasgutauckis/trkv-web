@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getUser, updateVIPSessionExpiration, createVIPSession } from '@/lib/db';
 import { db } from '@/lib/firebase';
+import { addAuditLog } from '@/services/eventsub-manager';
 import { z } from 'zod';
 
 // Schema for test redemption request
@@ -14,25 +15,6 @@ const testRedemptionSchema = z.object({
   rewardTitle: z.string().default('Test Reward'),
   rewardCost: z.number().default(1000)
 });
-
-// Add audit log function
-async function addAuditLog(entry: {
-  channelId: string;
-  action: string;
-  username: string;
-  userId: string;
-  details?: Record<string, any>;
-}): Promise<void> {
-  try {
-    // Add to audit log collection
-    await db.collection('auditLogs').add({
-      ...entry,
-      timestamp: new Date()
-    });
-  } catch (error) {
-    console.error('Error adding audit log entry:', error);
-  }
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -87,7 +69,7 @@ export async function POST(request: NextRequest) {
       const vipSession = vipSessionsSnapshot.docs[0];
       await updateVIPSessionExpiration(vipSession.id, expirationDate);
       
-      // Log the extension
+      // Log the extension using the EventSub manager's addAuditLog
       await addAuditLog({
         channelId,
         action: 'VIP_EXTENDED',
@@ -117,7 +99,7 @@ export async function POST(request: NextRequest) {
         grantMethod: 'other'
       });
       
-      // Log the grant
+      // Log the grant using the EventSub manager's addAuditLog
       await addAuditLog({
         channelId,
         action: 'VIP_GRANTED',
@@ -146,6 +128,29 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Error processing test redemption:', error);
+    
+    // If there's an error, try to log it
+    try {
+      const session = await getServerSession(authOptions);
+      if (session?.user) {
+        const body = await request.json();
+        if (body && body.channelId && body.userId && body.username) {
+          await addAuditLog({
+            channelId: body.channelId,
+            action: 'VIP_GRANT_FAILED',
+            username: body.username,
+            userId: body.userId,
+            details: {
+              method: 'test_redemption',
+              error: error instanceof Error ? error.message : String(error)
+            }
+          });
+        }
+      }
+    } catch (logError) {
+      console.error('Error logging test redemption failure:', logError);
+    }
+    
     return NextResponse.json({ 
       error: 'Internal server error',
       message: 'Failed to process test redemption',

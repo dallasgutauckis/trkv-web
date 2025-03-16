@@ -31,17 +31,18 @@ export async function GET(request: NextRequest) {
     try {
       // Build query
       let query = db.collection('auditLogs')
-        .where('channelId', '==', channelId);
+        .where('channelId', '==', channelId)
+        .orderBy('timestamp', 'desc');
       
       // Add action filter if provided
       if (action) {
         query = query.where('action', '==', action);
       }
       
-      // Try without ordering first (in case index doesn't exist)
+      // Execute query with limit
       const snapshot = await query.limit(limit).get();
       
-      // Format results and sort in memory
+      // Format results
       const logs = snapshot.docs.map(doc => {
         const data = doc.data();
         return {
@@ -51,10 +52,7 @@ export async function GET(request: NextRequest) {
         };
       });
       
-      // Sort by timestamp descending
-      logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      
-      return NextResponse.json(logs);
+      return NextResponse.json({ logs });
     } catch (error) {
       // Check if it's an index error
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -87,7 +85,10 @@ export async function GET(request: NextRequest) {
         // Limit after sorting
         const limitedLogs = logs.slice(0, limit);
         
-        return NextResponse.json(limitedLogs);
+        return NextResponse.json({ 
+          logs: limitedLogs,
+          indexUrl
+        });
       }
       
       // If it's not an index error, rethrow

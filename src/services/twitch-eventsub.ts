@@ -23,7 +23,7 @@ function debugLog(...args: any[]) {
 }
 
 // Add audit log function
-async function addAuditLog(entry: {
+export async function addAuditLog(entry: {
   channelId: string;
   action: string;
   username: string;
