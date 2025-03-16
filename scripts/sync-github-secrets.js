@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 
 /**
- * GitHub Secrets and Variables Sync Tool
+ * GitHub Secrets & Variables Sync Tool
  * 
- * This script syncs environment variables from a .env file to GitHub repository 
- * secrets and environment variables.
+ * This script reads variables from a .env file and sets them as GitHub repository 
+ * secrets or environment variables for use in GitHub Actions workflows.
  * 
- * Requirements:
- * - Node.js 14+
- * - A GitHub personal access token with repo permissions
+ * Usage:
+ *   node sync-github-secrets.js [options]
+ * 
+ * Options:
+ *   --help                 Show this help message
+ *   --env-file <file>      Specify a custom .env file path (default: ./.env)
  */
 
 const fs = require('fs');
@@ -16,12 +19,57 @@ const path = require('path');
 const { execSync } = require('child_process');
 const { Octokit } = require('@octokit/rest');
 const dotenv = require('dotenv');
-const sodium = require('libsodium-wrappers');
+const sodium = require('tweetsodium');
 const chalk = require('chalk');
 const prompts = require('prompts');
+const readline = require('readline');
 
-// Configuration
-const ENV_FILE = '.env';
+// Parse command line arguments
+const args = process.argv.slice(2);
+let envFilePath = '.env';
+let showHelp = false;
+
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--help' || args[i] === '-h') {
+    showHelp = true;
+  } else if (args[i] === '--env-file' || args[i] === '-e') {
+    if (i + 1 < args.length) {
+      envFilePath = args[i + 1];
+      i++; // Skip the next argument
+    } else {
+      console.error('\x1b[31mError: Missing argument for --env-file\x1b[0m');
+      process.exit(1);
+    }
+  } else {
+    console.error(`\x1b[31mError: Unknown option ${args[i]}\x1b[0m`);
+    showHelp = true;
+  }
+}
+
+// Show help message
+if (showHelp) {
+  console.log('GitHub Secrets & Variables Sync Tool');
+  console.log('');
+  console.log('Usage:');
+  console.log('  node sync-github-secrets.js [options]');
+  console.log('');
+  console.log('Options:');
+  console.log('  -h, --help                 Show this help message');
+  console.log('  -e, --env-file <file>      Specify a custom .env file path (default: ./.env)');
+  console.log('');
+  console.log('Examples:');
+  console.log('  node sync-github-secrets.js');
+  console.log('  node sync-github-secrets.js --env-file ../.env.production');
+  console.log('');
+  console.log('Description:');
+  console.log('  This script reads variables from a .env file and sets them as GitHub repository');
+  console.log('  secrets or environment variables for use in GitHub Actions workflows.');
+  console.log('');
+  console.log('  Sensitive variables (like API keys and tokens) are set as encrypted secrets,');
+  console.log('  while non-sensitive variables (like project IDs and URLs) are set as environment');
+  console.log('  variables in the \'production\' environment.');
+  process.exit(0);
+}
 
 // Variables to be set as secrets (sensitive information)
 const SECRETS = [
@@ -49,15 +97,15 @@ console.log(chalk.blue('========================================================
 async function main() {
   try {
     // Check if .env file exists
-    if (!fs.existsSync(ENV_FILE)) {
-      console.error(chalk.red(`Error: ${ENV_FILE} file not found.`));
-      console.error(`Please create a ${ENV_FILE} file with the required variables.`);
+    if (!fs.existsSync(envFilePath)) {
+      console.error(chalk.red(`Error: ${envFilePath} file not found.`));
+      console.error(`Please create a ${envFilePath} file with the required variables.`);
       process.exit(1);
     }
 
     // Load .env file
-    console.log(chalk.blue(`Loading variables from ${ENV_FILE}...`));
-    const envConfig = dotenv.parse(fs.readFileSync(ENV_FILE));
+    console.log(chalk.blue(`Loading variables from ${envFilePath}...`));
+    const envConfig = dotenv.parse(fs.readFileSync(envFilePath));
     
     // Get repository info from git
     const repoInfo = getRepositoryInfo();
@@ -68,7 +116,7 @@ async function main() {
     }
     
     console.log(`Repository: ${chalk.yellow(`${repoInfo.owner}/${repoInfo.repo}`)}`);
-    console.log(`Environment File: ${chalk.yellow(ENV_FILE)}`);
+    console.log(`Environment File: ${chalk.yellow(envFilePath)}`);
     console.log(chalk.blue('-----------------------------------------------------------'));
 
     // Get GitHub token
@@ -175,7 +223,7 @@ async function main() {
         });
       }
       
-      console.log(chalk.yellow(`Please add them to your ${ENV_FILE} file and run this script again.`));
+      console.log(chalk.yellow(`Please add them to your ${envFilePath} file and run this script again.`));
     }
     
     console.log(chalk.blue('=========================================================='));
@@ -198,7 +246,7 @@ async function encryptSecret(secret, publicKey) {
   const messageBytes = Buffer.from(secret);
   
   // Encrypt using libsodium
-  const encryptedBytes = sodium.crypto_box_seal(messageBytes, keyBytes);
+  const encryptedBytes = sodium.seal(messageBytes, keyBytes);
   
   // Return as base64 string
   return Buffer.from(encryptedBytes).toString('base64');
@@ -288,7 +336,7 @@ async function getGitHubToken() {
   }
   
   // Then check if it's in the .env file
-  const env = dotenv.parse(fs.readFileSync(ENV_FILE));
+  const env = dotenv.parse(fs.readFileSync(envFilePath));
   if (env.GITHUB_TOKEN) {
     return env.GITHUB_TOKEN;
   }

@@ -12,8 +12,61 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Configuration
+# Default configuration
 ENV_FILE=".env"
+SHOW_HELP=false
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -h|--help)
+      SHOW_HELP=true
+      shift
+      ;;
+    -e|--env-file)
+      if [[ $# -gt 1 ]]; then
+        ENV_FILE="$2"
+        shift 2
+      else
+        echo -e "${RED}Error: Missing argument for $1${NC}"
+        exit 1
+      fi
+      ;;
+    *)
+      echo -e "${RED}Error: Unknown option $1${NC}"
+      SHOW_HELP=true
+      shift
+      ;;
+  esac
+done
+
+# Show help message
+if $SHOW_HELP; then
+  echo "GitHub Secrets & Variables Sync Tool"
+  echo ""
+  echo "Usage:"
+  echo "  ./sync-github-secrets.sh [options]"
+  echo ""
+  echo "Options:"
+  echo "  -h, --help                 Show this help message"
+  echo "  -e, --env-file <file>      Specify a custom .env file path (default: ./.env)"
+  echo ""
+  echo "Examples:"
+  echo "  ./sync-github-secrets.sh"
+  echo "  ./sync-github-secrets.sh --env-file ../.env.production"
+  echo ""
+  echo "Description:"
+  echo "  This script reads variables from a .env file and sets them as GitHub repository"
+  echo "  secrets or environment variables for use in GitHub Actions workflows."
+  echo ""
+  echo "  Sensitive variables (like API keys and tokens) are set as encrypted secrets,"
+  echo "  while non-sensitive variables (like project IDs and URLs) are set as environment"
+  echo "  variables in the 'production' environment."
+  echo ""
+  echo "Requirements:"
+  echo "  - GitHub CLI (gh) installed and authenticated"
+  exit 0
+fi
 
 # Variables to be set as secrets (sensitive information)
 SECRETS=(
