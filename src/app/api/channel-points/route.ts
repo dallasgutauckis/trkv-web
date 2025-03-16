@@ -3,7 +3,6 @@ import { getServerSession } from 'next-auth';
 import * as z from 'zod';
 import { createChannelPointReward, getChannelPointRewards } from '@/lib/twitch';
 import { getChannelPointReward, updateChannelPointReward } from '@/lib/db';
-import { createEventSubSubscriptions } from '@/lib/eventsub';
 import { authOptions } from '@/lib/auth';
 import { ChannelPointReward } from '@/types/database';
 import { randomUUID } from 'crypto';
@@ -72,8 +71,9 @@ export async function POST(req: Request) {
 
     await updateChannelPointReward(reward);
 
-    // Create EventSub subscriptions
-    await createEventSubSubscriptions(body.channelId);
+    // Note: EventSub subscriptions are now handled by the standalone service
+    // The standalone EventSub service will automatically detect new rewards from Firestore
+    console.log(`Channel point reward created. The standalone EventSub service will handle subscriptions for channel ${body.channelId}`);
 
     return NextResponse.json(reward);
   } catch (error) {

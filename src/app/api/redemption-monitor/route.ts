@@ -2,132 +2,155 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getUser } from '@/lib/db';
-import { 
-  startRedemptionMonitoring, 
-  stopRedemptionMonitoring, 
-  getRedemptionMonitorStatus 
-} from '@/services/eventsub-manager';
-import { z } from 'zod';
 import { db } from '@/lib/firebase';
-import { ensureEventSubMonitoring } from '@/server';
+import * as z from 'zod';
 
-// Schema for update request
-const updateMonitorSchema = z.object({
-  channelId: z.string(),
-  rewardId: z.string().optional(),
-  isActive: z.boolean()
-});
+// Define constants for service status
+const COLLECTION_MONITORING = 'channelPointMonitoring';
+const COLLECTION_SERVICE_STATUS = 'serviceStatus';
+const SERVICE_DOC_ID = 'eventsub-service';
 
-export async function GET(request: NextRequest) {
+/**
+ * This endpoint now integrates with the standalone EventSub service
+ * instead of using the local implementation.
+ * 
+ * The standalone service automatically detects settings from Firestore,
+ * so we just need to update the database.
+ */
+
+// Definition for update request
+interface UpdateRequest {
+  channelId: string;
+  isEnabled: boolean;
+  rewardId: string;
+}
+
+/**
+ * Get the status of the reward monitoring for a channel
+ */
+export async function GET(req: Request) {
   try {
-    // Ensure EventSub monitoring is running
-    await ensureEventSubMonitoring();
-
-    // Check authentication
+    // Authenticate user
     const session = await getServerSession(authOptions);
-    if (!session?.user) {
+    if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-
-    // Get query parameters
-    const url = new URL(request.url);
-    const channelId = url.searchParams.get('channelId');
-
+    
+    // Get channelId from query params
+    const { searchParams } = new URL(req.url);
+    const channelId = searchParams.get('channelId');
+    
     if (!channelId) {
       return NextResponse.json({ error: 'Missing channelId parameter' }, { status: 400 });
     }
-
-    // Get user to verify ownership
-    const user = await getUser(session.user.id);
-    if (!user || user.twitchId !== channelId) {
-      return NextResponse.json({ error: 'Unauthorized to access this channel' }, { status: 403 });
-    }
-
-    // Get monitoring status
-    const status = await getRedemptionMonitorStatus(channelId);
     
-    return NextResponse.json({ 
-      monitor: status || { isActive: false, rewardId: null }
+    // Get monitoring status from Firestore
+    const monitoringRef = db.collection(COLLECTION_MONITORING).doc(channelId);
+    const monitoringDoc = await monitoringRef.get();
+    
+    // Get service status from Firestore
+    const serviceRef = db.collection(COLLECTION_SERVICE_STATUS).doc(SERVICE_DOC_ID);
+    const serviceDoc = await serviceRef.get();
+    
+    // Prepare service status information
+    const serviceStatus = serviceDoc.exists 
+      ? {
+          isOnline: serviceDoc.data()?.isOnline || false,
+          lastSeen: serviceDoc.data()?.lastSeen?.toDate() || null,
+          sessionId: serviceDoc.data()?.sessionId || null
+        }
+      : {
+          isOnline: false,
+          lastSeen: null,
+          sessionId: null
+        };
+    
+    // Return monitoring status and service status
+    return NextResponse.json({
+      isEnabled: monitoringDoc.exists ? monitoringDoc.data()?.isEnabled || false : false,
+      rewardId: monitoringDoc.exists ? monitoringDoc.data()?.rewardId || null : null,
+      serviceStatus
     });
+    
   } catch (error) {
-    console.error('Error getting redemption monitor status:', error);
-    return NextResponse.json({ 
-      error: error instanceof Error ? error.message : 'Unknown error'
-    }, { status: 500 });
+    console.error('Error fetching monitoring status:', error);
+    return NextResponse.json({ error: 'Failed to fetch monitoring status' }, { status: 500 });
   }
 }
 
-export async function POST(request: NextRequest) {
+/**
+ * Update the reward monitoring status for a channel
+ */
+export async function POST(req: Request) {
   try {
-    // Ensure EventSub monitoring is running
-    await ensureEventSubMonitoring();
-
-    // Check authentication
+    // Authenticate user
     const session = await getServerSession(authOptions);
-    if (!session?.user) {
+    if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-
-    // Parse and validate request body
-    const body = await request.json();
-    const result = updateMonitorSchema.safeParse(body);
     
-    if (!result.success) {
+    // Parse request body
+    let body: UpdateRequest;
+    try {
+      const json = await req.json();
+      body = {
+        channelId: json.channelId,
+        isEnabled: json.isEnabled,
+        rewardId: json.rewardId
+      };
+      
+      // Validate required fields
+      if (!body.channelId) throw new Error('Missing channelId');
+      if (typeof body.isEnabled !== 'boolean') throw new Error('isEnabled must be a boolean');
+      if (body.isEnabled && !body.rewardId) throw new Error('rewardId is required when enabling monitoring');
+    } catch (error) {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
     }
-
-    const { channelId, rewardId, isActive } = result.data;
-
-    // Get user to verify ownership
-    const user = await getUser(session.user.id);
-    if (!user || user.twitchId !== channelId) {
-      return NextResponse.json({ error: 'Unauthorized to access this channel' }, { status: 403 });
+    
+    // Get service status to check if it's online
+    const serviceRef = db.collection(COLLECTION_SERVICE_STATUS).doc(SERVICE_DOC_ID);
+    const serviceDoc = await serviceRef.get();
+    const serviceStatus = serviceDoc.exists 
+      ? {
+          isOnline: serviceDoc.data()?.isOnline || false,
+          lastSeen: serviceDoc.data()?.lastSeen?.toDate() || null,
+          sessionId: serviceDoc.data()?.sessionId || null
+        }
+      : {
+          isOnline: false,
+          lastSeen: null,
+          sessionId: null
+        };
+    
+    // If trying to enable monitoring but service is offline, return error
+    if (body.isEnabled && !serviceStatus.isOnline) {
+      return NextResponse.json({ 
+        error: 'Cannot enable monitoring while service is offline',
+        serviceStatus
+      }, { status: 503 });
     }
-
-    // Update monitoring status
-    if (isActive) {
-      if (!rewardId) {
-        return NextResponse.json({ error: 'rewardId is required when enabling monitoring' }, { status: 400 });
-      }
-
-      // Start monitoring
-      const success = await startRedemptionMonitoring(channelId, rewardId);
-      if (!success) {
-        return NextResponse.json({ error: 'Failed to start monitoring' }, { status: 500 });
-      }
-
-      // Update database
-      await db.collection('monitorSettings').doc(channelId).set({
-        channelId,
-        rewardId,
-        isActive: true,
-        updatedAt: new Date()
-      });
-    } else {
-      // Stop monitoring
-      await stopRedemptionMonitoring(channelId);
-
-      // Update database
-      if (rewardId) {
-        await db.collection('monitorSettings').doc(channelId).update({
-          isActive: false,
-          updatedAt: new Date()
-        });
-      } else {
-        await db.collection('monitorSettings').doc(channelId).set({
-          channelId,
-          rewardId: null,
-          isActive: false,
-          updatedAt: new Date()
-        });
-      }
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error('Error updating redemption monitor:', error);
+    
+    // Update monitoring status in Firestore
+    const monitoringRef = db.collection(COLLECTION_MONITORING).doc(body.channelId);
+    
+    await monitoringRef.set({
+      isEnabled: body.isEnabled,
+      rewardId: body.rewardId,
+      updatedAt: new Date()
+    }, { merge: true });
+    
+    // Log the action
+    console.log(`Channel ${body.channelId} ${body.isEnabled ? 'enabled' : 'disabled'} monitoring for reward ${body.rewardId}`);
+    
+    // Return success with service status
     return NextResponse.json({ 
-      error: error instanceof Error ? error.message : 'Unknown error'
-    }, { status: 500 });
+      success: true, 
+      isEnabled: body.isEnabled,
+      serviceStatus
+    });
+    
+  } catch (error) {
+    console.error('Error updating monitoring status:', error);
+    return NextResponse.json({ error: 'Failed to update monitoring status' }, { status: 500 });
   }
 } 

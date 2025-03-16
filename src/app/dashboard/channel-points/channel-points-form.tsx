@@ -6,14 +6,23 @@ import { useRouter } from "next/navigation";
 import { toast } from "react-hot-toast";
 import { Button } from "@/components/ui/button";
 import { Switch } from '@/components/ui/switch';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { AlertCircle, CheckCircle2, XCircle } from 'lucide-react';
 
 interface ChannelPointReward {
   id: string;
   title: string;
   cost: number;
   isEnabled: boolean;
-  prompt?: string;
   backgroundColor?: string;
+}
+
+interface ServiceStatus {
+  isOnline: boolean;
+  lastSeen: Date | null;
+  sessionId?: string;
 }
 
 interface ChannelPointsFormProps {
@@ -25,14 +34,16 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
   const { data: session } = useSession();
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
-  const [isFetching, setIsFetching] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingRewards, setIsLoadingRewards] = useState(false);
   const [rewards, setRewards] = useState<ChannelPointReward[]>([]);
-  const [selectedRewardId, setSelectedRewardId] = useState<string>("");
+  const [selectedRewardId, setSelectedRewardId] = useState<string | null>(null);
+  const [rewardTitle, setRewardTitle] = useState('VIP Access');
+  const [rewardCost, setRewardCost] = useState(50000);
   const [error, setError] = useState<string | null>(null);
   const [isMonitoringEnabled, setIsMonitoringEnabled] = useState(false);
-  const [isMonitoringSaving, setIsMonitoringSaving] = useState(false);
-  const [monitorStatus, setMonitorStatus] = useState<{ isActive: boolean; rewardId: string } | null>(null);
+  const [isUpdatingMonitoring, setIsUpdatingMonitoring] = useState(false);
+  const [serviceStatus, setServiceStatus] = useState<ServiceStatus | null>(null);
+  const [isLoadingStatus, setIsLoadingStatus] = useState(false);
   const [userScopes, setUserScopes] = useState<string[]>([]);
   const [isScopesLoading, setIsScopesLoading] = useState(true);
 
@@ -68,7 +79,7 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
     const fetchRewards = async () => {
       try {
         setError(null);
-        setIsFetching(true);
+        setIsLoadingRewards(true);
         console.log("Starting fetchRewards in ChannelPointsForm:", {
           channelId: initialChannelId,
           hasAccessToken: !!initialAccessToken,
@@ -100,312 +111,380 @@ export default function ChannelPointsForm({ initialChannelId, initialAccessToken
           throw new Error("Invalid response format from API");
         }
 
-        // Validate each reward
-        const validRewards = data.filter((reward): reward is ChannelPointReward => {
-          if (!reward || typeof reward !== 'object') {
-            console.warn("Invalid reward object:", reward);
-            return false;
-          }
-
-          if (!reward.id || !reward.title || typeof reward.cost !== 'number') {
-            console.warn("Reward missing required fields:", {
-              hasId: !!reward.id,
-              hasTitle: !!reward.title,
-              costType: typeof reward.cost,
-              reward: reward
-            });
-            return false;
-          }
-
-          return true;
-        });
-
-        console.log("Processed rewards:", {
-          total: data.length,
-          valid: validRewards.length,
-          rewards: validRewards
-        });
-        
-        setRewards(validRewards);
-        
-        // Fetch saved settings
-        try {
-          const settingsResponse = await fetch(`/api/settings?channelId=${initialChannelId}`, {
-            headers: {
-              "Authorization": `Bearer ${initialAccessToken}`,
-            },
-          });
-          
-          if (settingsResponse.ok) {
-            const settingsData = await settingsResponse.json();
-            if (settingsData && settingsData.channelPointRewardId) {
-              console.log("Found saved reward ID:", settingsData.channelPointRewardId);
-              setSelectedRewardId(settingsData.channelPointRewardId);
-            }
-          }
-        } catch (settingsError) {
-          console.error("Error fetching settings:", settingsError);
-          // Don't throw here, just continue with empty selection
-        }
+        setRewards(data);
+        fetchMonitorStatus();
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to load channel point rewards";
-        console.error("Error in fetchRewards:", {
-          error: error instanceof Error ? error.message : error,
-          channelId: initialChannelId,
-          hasAccessToken: !!initialAccessToken,
-          stack: error instanceof Error ? error.stack : undefined
-        });
-        setError(message);
-        toast.error(message);
+        setError(error instanceof Error ? error.message : "Failed to fetch rewards");
+        console.error("Error fetching rewards:", error);
       } finally {
-        setIsFetching(false);
+        setIsLoadingRewards(false);
       }
     };
 
-    fetchRewards();
-  }, [initialChannelId, initialAccessToken]);
-
-  // Add a new useEffect to fetch the monitoring status
-  useEffect(() => {
     async function fetchMonitorStatus() {
-      if (!session?.user) return;
-      
       try {
-        const response = await fetch(`/api/redemption-monitor?channelId=${session.user.id}`);
+        const response = await fetch(`/api/redemption-monitor?channelId=${initialChannelId}`);
         
         if (response.ok) {
           const data = await response.json();
-          if (data.monitor) {
-            setMonitorStatus(data.monitor);
-            setIsMonitoringEnabled(data.monitor.isActive);
-          }
+          console.log("Monitor status:", data);
+          
+          // Set monitor status state
+          setIsMonitoringEnabled(data.isEnabled || false);
+          
+          // Set service status
+          setServiceStatus({
+            isOnline: data.serviceStatus?.isOnline || false,
+            lastSeen: data.serviceStatus?.lastSeen ? new Date(data.serviceStatus.lastSeen) : null,
+            sessionId: data.serviceStatus?.sessionId
+          });
         }
       } catch (error) {
-        console.error('Error fetching monitor status:', error);
+        console.error("Error fetching monitor status:", error);
+      }
+    }
+
+    if (initialChannelId && initialAccessToken) {
+      fetchRewards();
+    }
+  }, [initialChannelId, initialAccessToken]);
+
+  // Fetch monitoring status
+  useEffect(() => {
+    async function fetchMonitoringStatus() {
+      if (!initialChannelId) return;
+      
+      setIsLoadingStatus(true);
+      try {
+        const response = await fetch(`/api/redemption-monitor?channelId=${initialChannelId}`);
+        if (response.ok) {
+          const data = await response.json();
+          setIsMonitoringEnabled(data.isEnabled || false);
+          
+          // Set service status
+          setServiceStatus({
+            isOnline: data.serviceStatus?.isOnline || false,
+            lastSeen: data.serviceStatus?.lastSeen ? new Date(data.serviceStatus.lastSeen) : null,
+            sessionId: data.serviceStatus?.sessionId
+          });
+        }
+      } catch (err) {
+        console.error('Error fetching monitoring status:', err);
+      } finally {
+        setIsLoadingStatus(false);
       }
     }
     
-    fetchMonitorStatus();
-  }, [session]);
-
-  const selectedReward = rewards.find(r => r.id === selectedRewardId);
-  console.log("Current rewards:", rewards);
-  console.log("Selected reward:", selectedReward);
-  
-  // Save the selected reward
-  const handleSaveReward = async () => {
-    if (!selectedRewardId) {
-      toast.error("Please select a reward first");
-      return;
-    }
+    fetchMonitoringStatus();
     
+    // Poll for status updates every 30 seconds
+    const intervalId = setInterval(fetchMonitoringStatus, 30000);
+    return () => clearInterval(intervalId);
+  }, [initialChannelId]);
+
+  const handleSaveReward = async () => {
     try {
-      setIsSaving(true);
+      setIsLoading(true);
       setError(null);
-      
-      const response = await fetch('/api/settings', {
-        method: 'POST',
+
+      const response = await fetch("/api/channel-points", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          "Authorization": `Bearer ${initialAccessToken}`,
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           channelId: initialChannelId,
-          channelPointRewardId: selectedRewardId,
+          title: rewardTitle,
+          cost: rewardCost,
         }),
       });
-      
+
+      const data = await response.json();
+
       if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Failed to save settings");
+        throw new Error(data.error || "Failed to create channel point reward");
       }
-      
-      toast.success("Channel point reward saved successfully");
+
+      toast.success("Channel point reward created!");
+      router.refresh();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to save settings";
-      console.error("Error saving settings:", error);
-      setError(message);
-      toast.error(message);
+      setError(error instanceof Error ? error.message : "Failed to create reward");
+      toast.error(error instanceof Error ? error.message : "Failed to create reward");
     } finally {
-      setIsSaving(false);
+      setIsLoading(false);
     }
   };
 
-  // Add a function to save the monitoring settings
-  const saveMonitoringSettings = async () => {
-    if (!session?.user || !selectedReward) return;
+  const handleMonitoringToggle = async () => {
+    if (!initialChannelId || !selectedRewardId) return;
     
+    setIsUpdatingMonitoring(true);
     try {
-      setIsMonitoringSaving(true);
-      
-      // If enabling monitoring, force initialize the service
-      if (isMonitoringEnabled) {
-        console.log('Enabling monitoring for reward:', selectedReward.id);
-      } else {
-        console.log('Disabling monitoring');
-      }
-      
-      const response = await fetch('/api/redemption-monitor', {
-        method: 'POST',
+      const response = await fetch("/api/redemption-monitor", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          channelId: session.user.id,
-          rewardId: selectedReward.id,
-          isActive: isMonitoringEnabled,
+          channelId: initialChannelId,
+          isEnabled: !isMonitoringEnabled,
+          rewardId: selectedRewardId,
         }),
       });
       
       if (!response.ok) {
-        throw new Error('Failed to update monitoring settings');
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to update monitoring status");
       }
       
-      const data = await response.json();
-      setMonitorStatus(data.monitor);
-      
-      toast.success(isMonitoringEnabled 
-        ? 'Automatic VIP granting enabled!' 
-        : 'Automatic VIP granting disabled');
-    } catch (error) {
-      console.error('Error saving monitoring settings:', error);
-      toast.error('Failed to update monitoring settings');
+      setIsMonitoringEnabled(!isMonitoringEnabled);
+      toast.success(
+        !isMonitoringEnabled 
+          ? "Monitoring enabled. The service will now grant VIP status for redemptions." 
+          : "Monitoring disabled. VIP status will no longer be granted for redemptions."
+      );
+    } catch (err: any) {
+      console.error("Error updating monitoring:", err);
+      toast.error(err.message || "Failed to update monitoring status");
     } finally {
-      setIsMonitoringSaving(false);
+      setIsUpdatingMonitoring(false);
     }
   };
 
-  if (!hasRequiredScopes && !isScopesLoading) {
-    return (
-      <div className="space-y-4">
-        <div className="p-4 bg-destructive/10 border border-destructive/20 text-destructive rounded-lg">
-          <h3 className="font-semibold text-lg mb-2">Missing Required Permissions</h3>
-          <p className="mb-2">
-            Your Twitch account is missing the following permissions required for channel point redemptions:
-          </p>
-          <ul className="list-disc list-inside mb-4">
-            {requiredScopes.filter(scope => !userScopes.includes(scope)).map(scope => (
-              <li key={scope}>{scope}</li>
-            ))}
-          </ul>
-          <p className="mb-4">
-            Please go to the Settings page and re-authenticate with Twitch to grant these permissions.
-          </p>
-          <Button 
-            onClick={() => router.push('/dashboard/settings')}
-            variant="destructive"
-          >
-            Go to Settings
-          </Button>
-        </div>
-      </div>
-    );
+  // Format timestamp for display
+  function formatTimestamp(date: Date | null): string {
+    if (!date) return 'Never';
+    
+    // Format: "5 minutes ago" or actual date if older than a day
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    
+    if (diffMins < 1) {
+      return 'Just now';
+    } else if (diffMins < 60) {
+      return `${diffMins} minute${diffMins === 1 ? '' : 's'} ago`;
+    } else if (diffMins < 1440) {
+      const hours = Math.floor(diffMins / 60);
+      return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+    } else {
+      return date.toLocaleString();
+    }
   }
 
   return (
-    <div className="space-y-8">
-      <div className="p-6 bg-background border-border rounded-lg border shadow-sm">
-        <h2 className="text-xl font-semibold mb-4">Select a Channel Point Reward</h2>
-        {isFetching ? (
-          <div className="text-center py-4">Loading rewards...</div>
-        ) : error ? (
-          <div className="text-red-500">{error}</div>
-        ) : rewards.length === 0 ? (
-          <div className="text-muted-foreground">No channel point rewards found.</div>
-        ) : (
-          <div className="space-y-4">
-            <div className="relative">
-              <select
-                value={selectedRewardId}
-                onChange={(e) => setSelectedRewardId(e.target.value)}
-                className="w-full p-2 pr-8 bg-background border-border rounded border"
-              >
-                <option value="">Select a reward...</option>
-                {rewards.map((reward) => (
-                  <option key={reward.id} value={reward.id}>
-                    {reward.title} ({reward.cost} points)
-                  </option>
-                ))}
-              </select>
-            </div>
+    <div className="space-y-6">
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          {error}
+        </div>
+      )}
 
-            {selectedReward && (
-              <div className="p-4 rounded-md border border-border bg-background/50">
-                <h3 className="font-medium mb-2">Selected Reward Details</h3>
-                <p><strong>Title:</strong> {selectedReward.title}</p>
-                <p><strong>Cost:</strong> {selectedReward.cost.toLocaleString()} points</p>
-                <p><strong>Status:</strong> {selectedReward.isEnabled ? 'Enabled' : 'Disabled'}</p>
-                {selectedReward.prompt && (
-                  <p><strong>Description:</strong> {selectedReward.prompt}</p>
-                )}
-                {selectedReward.backgroundColor && (
-                  <div className="mt-2 flex items-center">
-                    <span className="mr-2"><strong>Color:</strong></span>
-                    <div 
-                      className="w-6 h-6 rounded-full border border-border" 
-                      style={{ backgroundColor: selectedReward.backgroundColor }}
-                    ></div>
-                  </div>
-                )}
-                
-                <div className="mt-4">
-                  <Button
-                    onClick={handleSaveReward}
-                    disabled={isSaving}
-                    className="bg-purple-600 hover:bg-purple-700"
-                  >
-                    {isSaving ? "Saving..." : "Save Selection"}
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-      
-      {/* Add monitoring settings section */}
-      {selectedReward && (
-        <div className="mt-8 p-6 bg-background border-border rounded-lg border shadow-sm">
-          <h3 className="text-xl font-semibold mb-4">Automatic VIP Granting</h3>
-          <p className="text-muted-foreground mb-6">
-            When enabled, viewers who redeem this reward will automatically be granted VIP status
-            for the duration set in your VIP settings.
+      {!hasRequiredScopes && !isScopesLoading && (
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded">
+          <p className="font-medium">Missing Required Permissions</p>
+          <p className="text-sm">
+            To use channel points integration, you need to re-authenticate with the required permissions.
           </p>
-          
-          <div className="flex items-center justify-between">
-            <div>
-              <h4 className="font-medium">Enable automatic VIP granting</h4>
-              <p className="text-sm text-muted-foreground">
-                Viewers will receive VIP status immediately upon redemption
-              </p>
-            </div>
-            <Switch
-              checked={isMonitoringEnabled}
-              onCheckedChange={setIsMonitoringEnabled}
-              disabled={isMonitoringSaving || !selectedReward}
-            />
-          </div>
-          
-          <div className="mt-6">
+          <div className="mt-2">
             <Button
-              onClick={saveMonitoringSettings}
-              disabled={isMonitoringSaving || !selectedReward}
-              className="bg-purple-600 hover:bg-purple-700"
+              variant="outline"
+              size="sm"
+              onClick={() => router.push('/auth/signin?callbackUrl=/dashboard/channel-points')}
             >
-              {isMonitoringSaving ? 'Saving...' : 'Save Monitoring Settings'}
+              Re-authenticate
             </Button>
           </div>
-          
-          {monitorStatus && (
-            <div className="mt-4 text-sm">
-              <p className="text-muted-foreground">
-                Status: <span className={monitorStatus.isActive ? 'text-green-500' : 'text-yellow-500'}>
-                  {monitorStatus.isActive ? 'Active' : 'Inactive'}
+        </div>
+      )}
+
+      {/* Service Status Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle>EventSub Service Status</CardTitle>
+          <CardDescription>
+            Status of the standalone service that monitors channel point redemptions
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isLoadingStatus ? (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <AlertCircle className="h-5 w-5" />
+              <span>Checking service status...</span>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                {serviceStatus?.isOnline ? (
+                  <CheckCircle2 className="h-5 w-5 text-green-500" />
+                ) : (
+                  <XCircle className="h-5 w-5 text-red-500" />
+                )}
+                <span className="font-medium">
+                  Service is {serviceStatus?.isOnline ? 'online' : 'offline'}
                 </span>
-              </p>
+              </div>
+              
+              <div className="text-sm text-muted-foreground">
+                <p>Last activity: {formatTimestamp(serviceStatus?.lastSeen || null)}</p>
+                {serviceStatus?.sessionId && (
+                  <p className="mt-1">Session ID: {serviceStatus.sessionId}</p>
+                )}
+              </div>
             </div>
           )}
-        </div>
+        </CardContent>
+      </Card>
+
+      {/* Existing Reward Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Channel Point Reward</CardTitle>
+          <CardDescription>
+            Create a channel point reward that viewers can redeem for VIP status
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {error && (
+            <div className="mb-4 p-3 rounded-md border border-red-200 bg-red-50 text-red-800">
+              {error}
+            </div>
+          )}
+          
+          {isLoadingRewards ? (
+            <div className="text-center py-4 text-muted-foreground">Loading rewards...</div>
+          ) : rewards.length > 0 ? (
+            <div className="space-y-6">
+              <div>
+                <Label>Existing Rewards</Label>
+                <div className="grid gap-2 mt-2">
+                  {rewards.map((reward) => (
+                    <div 
+                      key={reward.id}
+                      className={`p-3 rounded-md border ${selectedRewardId === reward.id 
+                        ? 'border-primary bg-primary/5' 
+                        : 'border-border'}`}
+                    >
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <h4 className="font-medium">{reward.title}</h4>
+                          <p className="text-sm text-muted-foreground">
+                            {reward.cost.toLocaleString()} points
+                          </p>
+                        </div>
+                        <Button
+                          variant={selectedRewardId === reward.id ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => setSelectedRewardId(reward.id)}
+                          disabled={isLoading}
+                        >
+                          {selectedRewardId === reward.id ? "Selected" : "Select"}
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              {!selectedRewardId && (
+                <div className="grid gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="title">Reward Title</Label>
+                    <Input
+                      id="title"
+                      placeholder="VIP Access"
+                      value={rewardTitle}
+                      onChange={(e) => setRewardTitle(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="cost">Cost (Channel Points)</Label>
+                    <Input
+                      id="cost"
+                      type="number"
+                      min="1"
+                      max="1000000"
+                      placeholder="50000"
+                      value={rewardCost}
+                      onChange={(e) => setRewardCost(parseInt(e.target.value) || 0)}
+                    />
+                  </div>
+                  <Button
+                    disabled={isLoading || !rewardTitle || rewardCost < 1}
+                    onClick={handleSaveReward}
+                  >
+                    {isLoading ? "Creating..." : "Create Reward"}
+                  </Button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="title">Reward Title</Label>
+                <Input
+                  id="title"
+                  placeholder="VIP Access"
+                  value={rewardTitle}
+                  onChange={(e) => setRewardTitle(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="cost">Cost (Channel Points)</Label>
+                <Input
+                  id="cost"
+                  type="number"
+                  min="1"
+                  max="1000000"
+                  placeholder="50000"
+                  value={rewardCost}
+                  onChange={(e) => setRewardCost(parseInt(e.target.value) || 0)}
+                />
+              </div>
+              <Button
+                disabled={isLoading || !rewardTitle || rewardCost < 1}
+                onClick={handleSaveReward}
+              >
+                {isLoading ? "Creating..." : "Create Reward"}
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Monitoring Settings Card */}
+      {selectedRewardId && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Monitoring Settings</CardTitle>
+            <CardDescription>
+              Control whether VIP status is automatically granted for redemptions
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="font-medium">Enable VIP Granting</h4>
+                <p className="text-sm text-muted-foreground">
+                  When enabled, viewers who redeem the selected reward will automatically receive VIP status
+                </p>
+              </div>
+              <Switch
+                checked={isMonitoringEnabled}
+                onCheckedChange={handleMonitoringToggle}
+                disabled={isUpdatingMonitoring || !serviceStatus?.isOnline}
+              />
+            </div>
+            
+            {!serviceStatus?.isOnline && (
+              <div className="p-3 rounded-md border border-yellow-200 bg-yellow-50 text-yellow-800">
+                <p className="text-sm">
+                  The EventSub service is currently offline. Monitoring cannot be enabled until the service is back online.
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
     </div>
   );
