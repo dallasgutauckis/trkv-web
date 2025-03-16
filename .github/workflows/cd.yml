@@ -69,7 +69,8 @@ jobs:
             --set-env-vars "CRON_SECRET=${{ secrets.CRON_SECRET }}"
 
       - name: Show Output URL
-        run: echo "Service URL: $(gcloud run services describe $SERVICE --region $REGION --format 'value(status.url)')"
+        run: |
+          echo "Service URL: $(gcloud run services describe $SERVICE --region $REGION --format 'value(status.url)')"
 
   notify:
     needs: deploy
