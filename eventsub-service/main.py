@@ -678,6 +678,14 @@ def create_app():
             service_thread.start()
             logger.info("Started EventSub service in background thread")
     
+    @app.route("/", methods=["GET"])
+    def root():
+        return jsonify({"status": "ok", "service": "eventsub-service"})
+
+    @app.route("/health", methods=["GET"])
+    def health():
+        return jsonify({"status": "ok"})
+
     return app
 
 def run_service():
