@@ -64,7 +64,8 @@ function CustomTwitchProvider(options: OAuthUserConfig<any>): OAuthConfig<any> {
         }));
         
         // Get the callback URL from the provider
-        const callbackUrl = provider?.callbackUrl || "http://localhost:3000/api/auth/callback/twitch";
+        const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
+        const callbackUrl = provider?.callbackUrl || `${baseUrl}/api/auth/callback/twitch`;
         console.log("Using callback URL:", callbackUrl);
         
         try {
