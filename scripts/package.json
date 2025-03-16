@@ -1,0 +1,19 @@
+{
+  "name": "github-secrets-sync",
+  "version": "1.0.0",
+  "description": "Script to sync environment variables to GitHub repository secrets",
+  "private": true,
+  "scripts": {
+    "sync": "node sync-github-secrets.js"
+  },
+  "dependencies": {
+    "@octokit/rest": "^19.0.7",
+    "chalk": "^4.1.2",
+    "dotenv": "^16.3.1",
+    "libsodium-wrappers": "^0.7.11",
+    "prompts": "^2.4.2"
+  },
+  "engines": {
+    "node": ">=14"
+  }
+} 
