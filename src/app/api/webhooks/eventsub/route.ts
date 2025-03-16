@@ -1,8 +1,5 @@
 import { NextResponse } from 'next/server';
 import { createHmac } from 'crypto';
-import { grantVIPStatus } from '@/lib/twitch';
-import { createVIPSession, logAuditEvent } from '@/lib/db';
-import { VIPSession } from '@/types/database';
 
 const TWITCH_MESSAGE_ID = 'Twitch-Eventsub-Message-Id';
 const TWITCH_MESSAGE_TIMESTAMP = 'Twitch-Eventsub-Message-Timestamp';
@@ -33,8 +30,14 @@ function verifyTwitchSignature(req: Request, body: string) {
   return signature === expectedSignature;
 }
 
+/**
+ * @deprecated This endpoint is deprecated. A standalone EventSub service now handles Twitch EventSub events.
+ * This route only remains to handle webhook verifications for any existing subscriptions.
+ */
 export async function POST(req: Request) {
   try {
+    console.warn("DEPRECATED: EventSub webhook received. Consider using the standalone EventSub service instead.");
+    
     const body = await req.text();
     if (!verifyTwitchSignature(req, body)) {
       return new NextResponse('Invalid signature', { status: 401 });
@@ -45,64 +48,15 @@ export async function POST(req: Request) {
 
     // Handle webhook verification
     if (messageType === 'webhook_callback_verification') {
+      console.log("Handling webhook verification challenge");
       return new NextResponse(data.challenge, {
         headers: { 'Content-Type': 'text/plain' },
       });
     }
 
-    // Handle channel point redemption
-    if (data.subscription.type === 'channel.channel_points_custom_reward_redemption.add') {
-      const redemption = data.event;
-      const now = new Date();
-      const expiresAt = new Date(now.getTime() + 12 * 60 * 60 * 1000); // 12 hours
-
-      // Grant VIP status
-      const success = await grantVIPStatus({
-        channelId: redemption.broadcaster_user_id,
-        userId: redemption.user_id,
-        username: redemption.user_login,
-        grantedBy: 'system',
-        grantMethod: 'channelPoints',
-        metadata: {
-          rewardId: redemption.reward.id,
-          rewardTitle: redemption.reward.title
-        }
-      });
-
-      if (success) {
-        // Create VIP session
-        const vipSessionData: Omit<VIPSession, 'id'> = {
-          channelId: redemption.broadcaster_user_id,
-          userId: redemption.user_id,
-          username: redemption.user_login,
-          grantedAt: now,
-          expiresAt,
-          isActive: true,
-          grantedBy: 'system',
-          grantMethod: 'channelPoints',
-          metadata: {
-            rewardId: redemption.reward.id,
-            rewardTitle: redemption.reward.title
-          }
-        };
-
-        const vipSession = await createVIPSession(vipSessionData);
-
-        // Log audit event
-        await logAuditEvent({
-          channelId: redemption.broadcaster_user_id,
-          action: 'grant_vip',
-          targetUserId: redemption.user_id,
-          targetUsername: redemption.user_login,
-          performedBy: 'system',
-          details: {
-            redeemedWith: 'channel_points',
-            sessionId: vipSession.id,
-            redemptionId: redemption.id,
-          },
-        });
-      }
-    }
+    // Log but don't process events
+    console.log(`[DEPRECATED] Received EventSub event of type: ${data.subscription?.type}`);
+    console.log("Events are now handled by the standalone EventSub service.");
 
     return new NextResponse('OK');
   } catch (error) {

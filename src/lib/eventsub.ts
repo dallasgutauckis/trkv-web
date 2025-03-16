@@ -10,69 +10,25 @@ const authProvider = new AppTokenAuthProvider(
 
 const apiClient = new ApiClient({ authProvider });
 
+// [DEPRECATED] This function is no longer used as the standalone EventSub service now handles subscriptions
+// Keeping for reference but marking as deprecated
+/**
+ * @deprecated Use the standalone EventSub service instead
+ */
 export async function createEventSubSubscriptions(userId: string) {
-  try {
-    const user = await getUser(userId);
-    if (!user?.settings?.channelPointRewardId) {
-      throw new Error('Channel point reward not configured');
-    }
-
-    // Create subscription for channel point redemptions
-    await apiClient.eventSub.createSubscription(
-      'channel.channel_points_custom_reward_redemption.add',
-      '1',
-      {
-        broadcaster_user_id: userId,
-        reward_id: user.settings.channelPointRewardId
-      },
-      {
-        method: 'webhook',
-        callback: `${process.env.NEXT_PUBLIC_BASE_URL}/api/webhooks/eventsub`,
-        secret: process.env.EVENTSUB_SECRET || ''
-      }
-    );
-
-    // Create subscription for VIP updates
-    await apiClient.eventSub.createSubscription(
-      'channel.vip.add',
-      '1',
-      {
-        broadcaster_user_id: userId
-      },
-      {
-        method: 'webhook',
-        callback: `${process.env.NEXT_PUBLIC_BASE_URL}/api/webhooks/eventsub`,
-        secret: process.env.EVENTSUB_SECRET || ''
-      }
-    );
-
-    await apiClient.eventSub.createSubscription(
-      'channel.vip.remove',
-      '1',
-      {
-        broadcaster_user_id: userId
-      },
-      {
-        method: 'webhook',
-        callback: `${process.env.NEXT_PUBLIC_BASE_URL}/api/webhooks/eventsub`,
-        secret: process.env.EVENTSUB_SECRET || ''
-      }
-    );
-
-    return true;
-  } catch (error) {
-    console.error('Error creating EventSub subscriptions:', error);
-    return false;
-  }
+  console.warn('createEventSubSubscriptions is deprecated. Using standalone EventSub service instead.');
+  return true; // Return success without creating subscriptions
 }
 
 export async function deleteEventSubSubscriptions(userId: string) {
   try {
+    console.log('Cleaning up any existing EventSub subscriptions for user:', userId);
     const subscriptions = await apiClient.eventSub.getSubscriptions();
     
     for (const subscription of subscriptions.data) {
       if (subscription.condition.broadcaster_user_id === userId) {
         await apiClient.eventSub.deleteSubscription(subscription.id);
+        console.log(`Deleted EventSub subscription: ${subscription.id}`);
       }
     }
 
